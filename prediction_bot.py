@@ -65,7 +65,10 @@ PREDICTION_PLANS = {
 
 def get_user_data(user_id):
     """Retrieves user data from MongoDB or creates a new entry if not found."""
-    if users_collection is None:
+    if users_collection is None: 
+        logger.warning("Database connection unavailable. Returning empty user data.")
+        return {}
+        
     user = users_collection.find_one({"user_id": user_id})
     if user is None:
         user = {
@@ -78,7 +81,7 @@ def get_user_data(user_id):
         }
         users_collection.insert_one(user)
     return user
-
+    
 def update_user_field(user_id, field, value):
     """Updates a single field for a user in MongoDB."""
     if not users_collection: return
@@ -545,5 +548,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
