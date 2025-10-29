@@ -1,1 +1,3 @@
-python-telegram-botpymongopython-dotenv
+python-telegram-bot
+pymongo
+python-dotenv
