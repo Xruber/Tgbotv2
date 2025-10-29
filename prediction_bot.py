@@ -53,7 +53,7 @@ except Exception as e:
 
 # --- Constants ---
 REGISTER_LINK = "https://example.com/register"
-PAYMENT_IMAGE_URL = "https://placehold.co/500x300/007bff/ffffff?text=QR+Code+or+UPI+ID"
+PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433082788600483871/Screenshot_20251029-1135273.png?ex=690365da&is=6902145a&hm=ce70f29e49b58738d5d79f228f307c33e0fb2cccd0bc9edb6bc466a2b05db110&"
 PREDICTION_MESSAGE = "🌟 **Your Exclusive Prediction is Here!** 🌟\n\nThis is the winning advice you paid for. Good luck!"
 
 PREDICTION_PLANS = {
@@ -478,4 +478,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
     
