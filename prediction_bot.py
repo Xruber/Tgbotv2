@@ -47,7 +47,7 @@ except Exception as e:
     SELECTING_PLAN,
     WAITING_FOR_PAYMENT_PROOF,
     WAITING_FOR_UTR,
-) = range(4)
+) = range(3)
 
 # --- Constants ---
 REGISTER_LINK = "https://example.com/register"
@@ -545,3 +545,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
