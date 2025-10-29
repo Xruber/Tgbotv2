@@ -12,7 +12,6 @@ from telegram.ext import (
     CallbackQueryHandler,
     MessageHandler,
     filters,
-    JobQueue,
 )
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -41,64 +40,97 @@ try:
     logger.info("Successfully connected to MongoDB.")
 except Exception as e:
     logger.error(f"Failed to connect to MongoDB: {e}")
-    # Exit or handle gracefully if DB connection is critical
+    users_collection = None # Set to None if connection fails
 
 # --- States for ConversationHandler ---
 (
     SELECTING_PLAN,
     WAITING_FOR_PAYMENT_PROOF,
     WAITING_FOR_UTR,
-    WAITING_FOR_ADMIN_TIME,
 ) = range(4)
 
 # --- Constants ---
 REGISTER_LINK = "https://example.com/register"
-PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433082788600483871/Screenshot_20251029-1135273.png?ex=690365da&is=6902145a&hm=ce70f29e49b58738d5d79f228f307c33e0fb2cccd0bc9edb6bc466a2b05db110&"
-PREDICTION_MESSAGE = "🌟 **Your Exclusive Prediction is Here!** 🌟\n\nThis is the winning advice you paid for. Good luck!"
+PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433082788600483871/Screenshot_20251029-1135273.png?ex=690365da&is=6902145a&hm=ce70f29e49b58738d5d79f228f307c33e0fb2ccc"
+PREDICTION_MESSAGE = "🌟 **Your Exclusive Prediction is Here!** 🌟\n\n[Recurring Access Active]\n\n*The market analysis suggests moderate volatility for the next 6 hours. Keep an eye on support level 45,000.*"
 
 PREDICTION_PLANS = {
-    "1_hour": {"name": "1 Hour Prediction", "price": "70₹", "duration_minutes": 60},
-    "1_day": {"name": "1 Day Prediction", "price": "300₹", "duration_minutes": 1440},
-    "7_day": {"name": "7 Day Prediction", "price": "1000₹", "duration_minutes": 10080},
+    # Duration is in seconds for easy calculation
+    "1_hour": {"name": "1 Hour Access", "price": "70₹", "duration_seconds": 3600},
+    "1_day": {"name": "1 Day Access", "price": "300₹", "duration_seconds": 86400},
+    "7_day": {"name": "7 Day Access", "price": "1000₹", "duration_seconds": 604800},
 }
 
 # --- Utility Functions ---
 
 def get_user_data(user_id):
     """Retrieves user data from MongoDB or creates a new entry if not found."""
+    if not users_collection: return {}
     user = users_collection.find_one({"user_id": user_id})
     if user is None:
         user = {
             "user_id": user_id,
             "username": None,
-            "prediction_status": "NONE",  # NONE, PENDING_UTR, ADMIN_REVIEW, ACCEPTED, READY
+            # NONE: No sub | PENDING_UTR: Waiting for UTR | ADMIN_REVIEW: Waiting for admin | ACTIVE: Subscription active
+            "prediction_status": "NONE", 
             "prediction_plan": None,
-            "prediction_available_at": None,
+            "expiry_timestamp": 0, # Timestamp when subscription ends (0 if none)
         }
         users_collection.insert_one(user)
     return user
 
 def update_user_field(user_id, field, value):
     """Updates a single field for a user in MongoDB."""
+    if not users_collection: return
     users_collection.update_one({"user_id": user_id}, {"$set": {field: value}})
 
-def get_prediction_keyboard(user_status):
+def is_subscription_active(user_data) -> bool:
+    """Checks if the subscription is currently active based on expiry time."""
+    # A user is active if status is 'ACTIVE' AND the expiry time is in the future
+    if user_data.get("prediction_status") == "ACTIVE" and user_data.get("expiry_timestamp", 0) > time.time():
+        return True
+    return False
+
+def get_remaining_time_str(expiry_timestamp: int) -> str:
+    """Formats the remaining time string."""
+    remaining_seconds = int(expiry_timestamp - time.time())
+    if remaining_seconds <= 0:
+        return "Expired"
+        
+    days = remaining_seconds // 86400
+    hours = (remaining_seconds % 86400) // 3600
+    minutes = (remaining_seconds % 3600) // 60
+    
+    if days > 0:
+        return f"{days}d {hours}h"
+    return f"{hours}h {minutes}m"
+
+
+def get_prediction_keyboard(user_data):
     """Generates the main keyboard based on user status."""
+    status = user_data.get("prediction_status")
+    expiry_timestamp = user_data.get("expiry_timestamp", 0)
+    
     buttons = [
         [
             InlineKeyboardButton("🔗 Register Link", url=REGISTER_LINK),
         ]
     ]
     
-    if user_status == "READY":
-        buttons.append([InlineKeyboardButton("✨ Get Prediction Now", callback_data="show_prediction")])
-    elif user_status == "ACCEPTED":
-        buttons.append([InlineKeyboardButton(f"⏳ Prediction Ready: {datetime.fromtimestamp(user_status['prediction_available_at']).strftime('%H:%M:%S')}", callback_data="show_prediction")])
-    elif user_status == "ADMIN_REVIEW":
-        buttons.append([InlineKeyboardButton("🔍 Prediction Status: Under Review", callback_data="prediction_status")])
+    if is_subscription_active(user_data):
+        time_left = get_remaining_time_str(expiry_timestamp)
+        buttons.append([
+            InlineKeyboardButton(f"✨ Get Prediction (Time Left: {time_left})", callback_data="show_prediction")
+        ])
+    elif status == "ADMIN_REVIEW" or status == "PENDING_UTR":
+        buttons.append([
+            InlineKeyboardButton("🔍 Subscription Status: Under Review", callback_data="subscription_status")
+        ])
     else:
-        # Default Prediction Menu
-        buttons.append([InlineKeyboardButton("🔮 Prediction (Paid)", callback_data="start_prediction_flow")])
+        # Default or Expired
+        buttons.append([
+            InlineKeyboardButton("🔮 Prediction Packages", callback_data="start_prediction_flow")
+        ])
     
     return InlineKeyboardMarkup(buttons)
 
@@ -110,19 +142,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     username = update.effective_user.username
     user_data = get_user_data(user_id)
     
-    # Update username if it has changed
+    # Update username if it changed
     if user_data.get("username") != username:
         update_user_field(user_id, "username", username)
-
-    status_code = user_data.get("prediction_status")
     
-    keyboard = get_prediction_keyboard(status_code)
+    # Check if a subscription just expired and clean up status
+    if user_data.get("prediction_status") == "ACTIVE" and user_data.get("expiry_timestamp", 0) < time.time():
+        update_user_field(user_id, "prediction_status", "NONE")
+        user_data["prediction_status"] = "NONE" # Update local data for this run
+        
+    keyboard = get_prediction_keyboard(user_data) # Generate keyboard based on latest status
+    
+    
+    initial_message = f"👋 Welcome, {update.effective_user.first_name}!\n\nUse the buttons below to register or manage your prediction package."
 
-    await update.message.reply_text(
-        f"👋 Welcome, {update.effective_user.first_name}!\n\n"
-        "Use the buttons below to register or start your prediction package.",
-        reply_markup=keyboard,
-    )
+    # If the user's status was just reset from active to none
+    if user_data.get("prediction_status") == "NONE" and user_data.get("expiry_timestamp", 0) != 0:
+        initial_message = (
+            f"👋 Welcome, {update.effective_user.first_name}!\n\n"
+            "⚠️ **Your previous subscription has expired.** Please purchase a new package to continue."
+        )
+
+    
+    if update.message:
+        await update.message.reply_text(
+            initial_message,
+            reply_markup=keyboard,
+        )
+    elif update.callback_query:
+        # This handles the 'start' pattern callback if used to refresh the menu
+        try:
+            await update.callback_query.edit_message_text(initial_message, reply_markup=keyboard)
+        except Exception:
+            await update.callback_query.message.reply_text(initial_message, reply_markup=keyboard)
+        
     return ConversationHandler.END
 
 
@@ -143,7 +196,7 @@ async def start_prediction_flow(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
     await query.edit_message_text(
-        "Choose your prediction package:",
+        "Choose your prediction package for continuous access:",
         reply_markup=keyboard,
     )
     return SELECTING_PLAN
@@ -169,14 +222,21 @@ async def select_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     # Send Payment Instructions and Image
     payment_message = (
         f"✅ You selected: **{plan['name']}** ({plan['price']})\n\n"
-        "Please complete the payment to the displayed QR code/UPI ID.\n\n"
+        "Please complete the payment to the displayed QR code/UPI ID and click 'Sended 🟢'.\n\n"
         "**NOTE:** This is a demonstration. Use a real payment method in a production bot."
     )
     
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Sended 🟢", callback_data="payment_sent")]]
     )
+    
+    # Edit the text message to prompt for the photo and caption
+    try:
+         await query.edit_message_text("Payment instructions are being sent via a new message...")
+    except:
+         pass # Ignore edit errors if message was already edited or is old
 
+    # Send new photo message with payment details
     await context.bot.send_photo(
         chat_id=user_id,
         photo=PAYMENT_IMAGE_URL,
@@ -185,9 +245,6 @@ async def select_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         reply_markup=keyboard,
     )
 
-    # Clean up the previous message
-    await query.edit_message_text("Payment instructions sent to chat.")
-    
     return WAITING_FOR_PAYMENT_PROOF
 
 
@@ -196,18 +253,31 @@ async def payment_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_caption(
-        "Thank you for confirming! Now, please reply with your **UTR (Unique Transaction Reference) Number** so the admin can verify your payment."
-    )
+    try:
+        await query.edit_message_caption(
+            caption="Thank you for confirming! Now, please **reply to this message** with your **UTR (Unique Transaction Reference) Number** so the admin can verify your payment.",
+            reply_markup=None, # Remove the 'Sended' button
+        )
+    except:
+         await query.edit_message_text(
+             "Thank you for confirming! Now, please **reply to this message** with your **UTR (Unique Transaction Reference) Number** so the admin can verify your payment."
+         )
     
     return WAITING_FOR_UTR
 
 
 async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 4: User sends UTR, payment successful message, and alerts admin."""
+    """Step 4: User sends UTR, updates status to ADMIN_REVIEW, and alerts admin."""
     utr = update.message.text
     user_id = update.effective_user.id
     user_name = update.effective_user.full_name
+    
+    user_data = get_user_data(user_id)
+    plan_key = user_data.get('prediction_plan') # Get the plan key from the user's DB entry
+
+    if not plan_key or plan_key not in PREDICTION_PLANS:
+        await update.message.reply_text("Error: Plan data missing. Please try /start again.")
+        return ConversationHandler.END
     
     # Store UTR and update status
     update_user_field(user_id, "last_utr", utr)
@@ -215,9 +285,9 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     
     # 1. Inform User
     await update.message.reply_text(
-        "**Payment Sucessful!**\n\n"
-        "Your payment (UTR: `{utr}`) is now under review.\n"
-        "You will receive a notification once your prediction is approved and ready. This typically happens within 1-2 hours."
+        f"**Payment Notification Received!**\n\n"
+        f"Your payment (UTR: `{utr}`) is now under review by the administrator.\n"
+        "You will receive a notification once your access is approved."
     )
     
     # 2. Alert Admin
@@ -234,9 +304,9 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         "🔔 **NEW PAYMENT REVIEW REQUIRED**\n\n"
         f"User: [{user_name}](tg://user?id={user_id})\n"
         f"User ID: `{user_id}`\n"
-        f"Plan: **{PREDICTION_PLANS[context.user_data.get('selected_plan_key')]['name']}**\n"
+        f"Plan: **{PREDICTION_PLANS[plan_key]['name']}**\n"
         f"UTR Provided: `{utr}`\n\n"
-        "Please check your bank records and confirm the payment."
+        "Please check your bank records and confirm the payment. Click Accept to grant access."
     )
 
     try:
@@ -248,7 +318,6 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
     except Exception as e:
         logger.error(f"Failed to send admin alert: {e}")
-        await update.message.reply_text("ERROR: Could not notify admin. Please contact support manually.")
     
     # End the UTR conversation
     return ConversationHandler.END
@@ -256,23 +325,68 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 # --- Admin Panel Handlers ---
 
 async def admin_accept_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Admin clicks ACCEPT. Asks for delay time."""
+    """
+    Admin clicks ACCEPT. Calculates expiry time, sets status to ACTIVE, and schedules expiry job.
+    """
     query = update.callback_query
-    await query.answer("Accepting request...")
+    await query.answer("Granting access...")
 
     # Extract the user ID of the buyer from callback data
     buyer_id = int(query.data.split("_")[-1])
     
-    # Store the buyer_id for the next conversation step
-    context.user_data["current_buyer_id"] = buyer_id
+    # 1. Get user data to find the purchased plan
+    buyer_data = get_user_data(buyer_id)
+    plan_key = buyer_data.get("prediction_plan")
+
+    if not plan_key or plan_key not in PREDICTION_PLANS:
+        await query.edit_message_text(f"Error: Could not find valid plan for user `{buyer_id}`. Rejected.")
+        update_user_field(buyer_id, "prediction_status", "NONE")
+        return ConversationHandler.END
+        
+    plan = PREDICTION_PLANS[plan_key]
+    duration_seconds = plan["duration_seconds"]
     
-    await query.edit_message_text(
-        f"✅ Payment accepted for user `{buyer_id}`.\n\n"
-        "**Now, please enter the prediction delay in seconds** "
-        "(e.g., enter `3600` for 1 hour, or `10` for testing):"
+    # 2. Calculate Expiry Time
+    expiry_timestamp = time.time() + duration_seconds
+    
+    # 3. Update User Status in DB
+    update_user_field(buyer_id, "prediction_status", "ACTIVE")
+    update_user_field(buyer_id, "expiry_timestamp", int(expiry_timestamp))
+    
+    # 4. Schedule the Expiry Job (to notify user when time is up)
+    # Ensure any previous expiry job for this user is removed
+    job_name = f"pred_expiry_{buyer_id}"
+    current_jobs = context.application.job_queue.get_jobs_by_name(job_name)
+    for job in current_jobs:
+        job.schedule_removal()
+        
+    context.application.job_queue.run_once(
+        notify_subscription_expired,
+        duration_seconds, # run in the plan's duration time
+        data={"buyer_id": buyer_id},
+        name=job_name,
     )
     
-    return WAITING_FOR_ADMIN_TIME
+    # 5. Inform Admin
+    time_left_str = get_remaining_time_str(int(expiry_timestamp))
+    await query.edit_message_text(
+        f"✅ Access granted to user `{buyer_id}` for **{plan['name']}**.\n"
+        f"Subscription expires in: {time_left_str}."
+    )
+    
+    # 6. Inform User (Buyer)
+    try:
+        await context.bot.send_message(
+            chat_id=buyer_id,
+            text="🟢 **Payment Approved! Subscription Activated!** 🟢\n\n"
+                 f"You now have **{plan['name']}** access.\n"
+                 "Please use the **'Get Prediction'** button in your main menu (/start) to receive your exclusive content repeatedly until your access expires.",
+        )
+    except Exception as e:
+        logger.warning(f"Could not message buyer {buyer_id}: {e}")
+
+    # No need for a conversation state change, as this is a single action
+    return ConversationHandler.END
 
 async def admin_reject_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin clicks REJECT."""
@@ -297,139 +411,99 @@ async def admin_reject_request(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"Could not message rejected user {buyer_id}: {e}")
         
     await query.edit_message_text(f"❌ Request for user `{buyer_id}` has been rejected and user was notified.")
+    # No conversation to end here, just an action
     return ConversationHandler.END
 
-
-async def set_delay_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Admin enters delay time, and the prediction job is scheduled."""
-    try:
-        delay_seconds = int(update.message.text.strip())
-        if delay_seconds <= 0:
-            raise ValueError("Time must be positive.")
-    except ValueError:
-        await update.message.reply_text("Invalid time. Please enter a valid number of seconds (e.g., `600`):")
-        return WAITING_FOR_ADMIN_TIME
-    
-    buyer_id = context.user_data.get("current_buyer_id")
-    if not buyer_id:
-        await update.message.reply_text("Error: Buyer ID not found. Please restart the admin process.")
-        return ConversationHandler.END
-    
-    # Schedule the job
-    context.job_queue.run_once(
-        send_prediction_ready_notification,
-        delay_seconds,
-        data={"buyer_id": buyer_id, "delay": delay_seconds},
-        name=f"pred_ready_{buyer_id}",
-        chat_id=buyer_id,
-    )
-    
-    # Calculate ready time
-    ready_time = datetime.now() + timedelta(seconds=delay_seconds)
-    
-    # Update user status in DB
-    update_user_field(buyer_id, "prediction_status", "ACCEPTED")
-    update_user_field(buyer_id, "prediction_available_at", int(ready_time.timestamp()))
-    
-    # Inform Admin
-    await update.message.reply_text(
-        f"⏰ Prediction for user `{buyer_id}` scheduled!\n"
-        f"Delivery time: **{delay_seconds} seconds**.\n"
-        f"User will be notified at: **{ready_time.strftime('%Y-%m-%d %H:%M:%S')}**."
-    )
-    
-    # Inform User (Buyer)
-    try:
-        await context.bot.send_message(
-            chat_id=buyer_id,
-            text="🟢 **Payment Success & Prediction Scheduled!** 🟢\n\n"
-                 "The admin has approved your payment. Your prediction will be ready to view in "
-                 f"**{delay_seconds} seconds** (around {ready_time.strftime('%H:%M:%S')}).\n"
-                 "You will receive a notification when the time is up, and the 'Prediction' button on your main menu will become active.",
-        )
-    except Exception as e:
-        logger.warning(f"Could not message buyer {buyer_id}: {e}")
-
-    # End the admin conversation
-    return ConversationHandler.END
 
 # --- JobQueue Callback Function ---
 
-async def send_prediction_ready_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job function that runs after the delay to mark the prediction as ready."""
+async def notify_subscription_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job function that runs when the subscription expires."""
     job_data = context.job.data
     buyer_id = job_data["buyer_id"]
     
-    # Set status to READY
-    update_user_field(buyer_id, "prediction_status", "READY")
+    # Set status to NONE (Expired)
+    update_user_field(buyer_id, "prediction_status", "NONE")
+    update_user_field(buyer_id, "expiry_timestamp", 0)
+    update_user_field(buyer_id, "prediction_plan", None)
     
     # Send final notification to user
     try:
         await context.bot.send_message(
             chat_id=buyer_id,
-            text="✨ **PREDICTION IS READY!** ✨\n\n"
-                 "Your wait is over! Please click the 'Get Prediction Now' button in the main menu to view your content. /start",
-            reply_markup=get_prediction_keyboard("READY"),
+            text="🛑 **SUBSCRIPTION EXPIRED!** 🛑\n\n"
+                 "Your exclusive access has ended. Please use /start to view new subscription options.",
         )
     except Exception as e:
-        logger.error(f"Failed to send READY notification to user {buyer_id}: {e}")
+        logger.error(f"Failed to send EXPIRY notification to user {buyer_id}: {e}")
 
-# --- Final Prediction Delivery ---
+# --- Final Prediction Delivery (Recurring Access) ---
 
 async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Delivers the prediction message if the user is in the 'READY' state."""
+    """Delivers the prediction message if the user is in the 'ACTIVE' state."""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     
     user_data = get_user_data(user_id)
     
-    if user_data.get("prediction_status") == "READY":
-        # Send the prediction message
-        await query.edit_message_text(
-            text=PREDICTION_MESSAGE,
+    if is_subscription_active(user_data):
+        time_left_str = get_remaining_time_str(user_data["expiry_timestamp"])
+        
+        # 1. Send the prediction message (does NOT reset status)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{PREDICTION_MESSAGE}\n\n_Access remaining: {time_left_str}_",
             parse_mode="Markdown",
-            reply_markup=get_prediction_keyboard("NONE") # Show the default menu again
         )
-        # Reset the user's status after they receive the prediction
-        update_user_field(user_id, "prediction_status", "NONE")
-        update_user_field(user_id, "prediction_available_at", None)
-        update_user_field(user_id, "prediction_plan", None)
+        
+        # 2. Optionally update the main menu to reflect the latest time
+        await query.edit_message_reply_markup(get_prediction_keyboard(user_data))
+        
     else:
-        # If not READY, show status
-        current_status = user_data.get("prediction_status", "NONE")
-        if current_status == "ACCEPTED" and user_data.get("prediction_available_at"):
-            # Calculate remaining time
-            available_at = datetime.fromtimestamp(user_data["prediction_available_at"])
-            remaining_time = available_at - datetime.now()
-            
-            if remaining_time.total_seconds() > 0:
-                # Still waiting
-                hours, remainder = divmod(int(remaining_time.total_seconds()), 3600)
-                minutes, seconds = divmod(remainder, 60)
-                time_left_str = f"{hours}h {minutes}m {seconds}s"
-                
-                await query.answer(f"Prediction is still scheduled! Remaining time: {time_left_str}", show_alert=True)
-            else:
-                # Should have been marked ready, force update status
-                update_user_field(user_id, "prediction_status", "READY")
-                await query.answer("It looks like your prediction is ready! Please tap the button again.", show_alert=True)
-                await query.edit_message_reply_markup(get_prediction_keyboard("READY"))
-                
-        elif current_status == "ADMIN_REVIEW":
-             await query.answer("Your payment is currently being reviewed by the admin. Please wait for the approval notification.", show_alert=True)
-        else:
-             await query.answer("You must purchase a prediction plan first to view content.", show_alert=True)
-             await query.edit_message_reply_markup(get_prediction_keyboard(current_status))
+        # Subscription is inactive or expired
+        # Force status update in case it expired just now
+        if user_data.get("prediction_status") == "ACTIVE":
+             update_user_field(user_id, "prediction_status", "NONE")
+             user_data["prediction_status"] = "NONE"
+
+        await context.bot.send_message(
+             chat_id=user_id,
+             text="❌ **Access Denied/Expired.** Please use /start to renew your prediction package.",
+             reply_markup=get_prediction_keyboard(user_data)
+        )
+        
+        # Update the button the user just clicked to the "Prediction Packages" button
+        await query.edit_message_reply_markup(get_prediction_keyboard(user_data))
+
+
+async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Informs the user about their current payment/review status."""
+    query = update.callback_query
+    await query.answer(cache_time=1) # Prevent endless spinning
+
+    user_id = query.from_user.id
+    user_data = get_user_data(user_id)
+    current_status = user_data.get("prediction_status", "NONE")
+
+    if current_status == "ADMIN_REVIEW":
+        await query.answer("Your payment is currently being reviewed by the admin. Please wait for the approval notification.", show_alert=True)
+    elif current_status == "PENDING_UTR":
+        await query.answer("You need to enter your UTR number to proceed with payment verification.", show_alert=True)
+    elif current_status == "NONE":
+         await query.answer("You do not have an active request or subscription. Please purchase a plan.", show_alert=True)
+    else:
+        await query.answer(f"Status: {current_status}", show_alert=True)
 
 
 # --- Main Application Setup ---
 
 def main() -> None:
     """Run the bot."""
+    # Build application with JobQueue implicitly included
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # 1. Main Command Handler
+    # 1. Main Command Handler (Start and Subscription Status)
     application.add_handler(CommandHandler("start", start))
 
     # 2. Prediction Purchase Conversation Handler
@@ -439,7 +513,7 @@ def main() -> None:
             SELECTING_PLAN: [
                 CallbackQueryHandler(select_plan, pattern="^select_plan_"),
             ],
-            WAITING_FOR_PAYMENT_PROOF: [
+    WAITING_FOR_PAYMENT_PROOF: [
                 CallbackQueryHandler(payment_sent, pattern="^payment_sent$"),
             ],
             WAITING_FOR_UTR: [
@@ -451,33 +525,23 @@ def main() -> None:
     )
     application.add_handler(prediction_flow_handler)
     
-    # 3. Admin Approval Conversation Handler (only for the admin)
-    admin_approval_handler = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(admin_accept_request, pattern="^admin_accept_"),
-            CallbackQueryHandler(admin_reject_request, pattern="^admin_reject_"),
-        ],
-        states={
-            WAITING_FOR_ADMIN_TIME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), set_delay_time),
-            ],
-        },
-        fallbacks=[CommandHandler("start", start)],
-        # The admin must be the only one who can interact with this conversation
-        # This is enforced by filters.User(ADMIN_ID) in the WAITING_FOR_ADMIN_TIME step
-        allow_reentry=False,
+    # 3. Admin Approval Handler (only for the admin)
+    # The accept/reject actions are now single callback actions, not a multi-step conversation.
+    application.add_handler(
+        CallbackQueryHandler(admin_accept_request, pattern="^admin_accept_")
     )
-    application.add_handler(admin_approval_handler)
-
-    # 4. Final Prediction Viewer Handler
-    application.add_handler(CallbackQueryHandler(show_prediction, pattern="^show_prediction$|^prediction_status$"))
+    application.add_handler(
+        CallbackQueryHandler(admin_reject_request, pattern="^admin_reject_")
+    )
+    
+    # 4. Final Prediction Viewer and Status Handler
+    application.add_handler(CallbackQueryHandler(show_prediction, pattern="^show_prediction$"))
+    application.add_handler(CallbackQueryHandler(show_subscription_status, pattern="^subscription_status$"))
 
     # Start the Bot
     logger.info("Bot is starting...")
+    # NOTE: run_polling handles the JobQueue dispatch automatically
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
-
-    
-
