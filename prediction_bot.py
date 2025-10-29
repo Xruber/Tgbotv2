@@ -196,7 +196,7 @@ async def payment_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
+    await query.edit_message_caption(
         "Thank you for confirming! Now, please reply with your **UTR (Unique Transaction Reference) Number** so the admin can verify your payment."
     )
     
@@ -480,3 +480,4 @@ if __name__ == "__main__":
     main()
 
     
+
