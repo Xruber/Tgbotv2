@@ -65,7 +65,7 @@ PREDICTION_PLANS = {
 
 def get_user_data(user_id):
     """Retrieves user data from MongoDB or creates a new entry if not found."""
-    if not users_collection: return {}
+    if users_collection is None:
     user = users_collection.find_one({"user_id": user_id})
     if user is None:
         user = {
@@ -545,4 +545,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
