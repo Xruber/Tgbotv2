@@ -540,10 +540,15 @@ async def receive_period_number(update: Update, context: ContextTypes.DEFAULT_TY
         f"Bet On → **{prediction}**\n"
         f"Note → *Keep lvl 5*"
     )
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("➡️ Next Prediction", callback_data="show_prediction")]]
+    )
     
     await update.message.reply_text(
         response_message,
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=keyboard, # 🆕 ADDED: Add the keyboard to the message
     )
     
     # End the prediction request conversation
@@ -632,3 +637,4 @@ def main() -> None:
 if __name__ == "__main__":
 
     main()
+
