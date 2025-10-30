@@ -491,12 +491,6 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         
         # 2. Optionally update the main menu to reflect the latest time
-        try:
-            await query.edit_message_reply_markup(get_prediction_keyboard(user_data))
-        except BadRequest as e:
-            if "message is not modified" not in str(e).lower():
-                raise 
-        
         # 3. MOVE TO THE NEW STATE
         return WAITING_FOR_PERIOD_NUMBER
         
@@ -636,4 +630,5 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
     main()
