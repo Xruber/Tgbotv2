@@ -51,7 +51,7 @@ except Exception as e:
 
 # --- Constants ---
 REGISTER_LINK = "https://example.com/register"
-PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433082788600483871/Screenshot_20251029-1135273.png?ex=690365da&is=6902145a&hm=ce70f29e49b58738d5d79f228f307c33e0fb2ccc"
+PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433268868255580262/Screenshot_20251029-1135273.png?ex=69041327&is=6902c1a7&hm=517ecf60348db21c748797801a6bcdc08336d7020d3bf41c889abe22ba4a4d26&"
 PREDICTION_MESSAGE = "🌟 **Your Exclusive Prediction is Here!** 🌟\n\n[Recurring Access Active]\n\n*The market analysis suggests moderate volatility for the next 6 hours. Keep an eye on support level 45,000.*"
 
 PREDICTION_PLANS = {
@@ -569,4 +569,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
     
