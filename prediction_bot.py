@@ -66,8 +66,7 @@ PREDICTION_PLANS = {
 
 # 🆕 NEW CONSTANT FOR THE PREDICTION PATTERN
 # Pattern: small, big, big, small (repeats every 4 periods)
-PREDICTION_PATTERN = ["Small", "Big", "Big", "Small", "Big", "Small", "Big", "Big", "Big", "Small", "Small", "Small", "Big", "Small"]
-
+PREDICTION_PATTERN = ["Small", "Big", "Big", "Small"]
 
 # --- Utility Functions ---
 
@@ -637,5 +636,6 @@ def main() -> None:
 if __name__ == "__main__":
 
     main()
+
 
 
