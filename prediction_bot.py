@@ -623,10 +623,10 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
         if new_streak > 4:
         	message = f"🚫⚠️ 5 LEVEL HAS CROSSED. ADMIN IS NOTIFIED & REFUND WILL BE INITIATED SOON ⚠️🚫."
             admin_loss_message = (
-        "🚨 ALERT 🚨\n\n"
-        f"User: [{user_name}](tg://user?id={user_id})\n"
-        f"User ID: `{user_id}`\n"
-        f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
+                 "🚨 ALERT 🚨\n\n"
+                f"User: [{user_name}](tg://user?id={user_id})\n"
+                f"User ID: `{user_id}`\n"
+                f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
         )
         
         try:
@@ -739,6 +739,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
