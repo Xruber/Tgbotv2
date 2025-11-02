@@ -627,7 +627,7 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
         new_streak = current_streak + 1
         update_user_field(user_id, "loss_streak", new_streak)
         
-        if new_streak < 4:
+        if new_streak > 4:
         	message = f"🚫⚠️ 5 LEVEL HAS CROSSED. ADMIN IS NOTIFIED & REFUND WILL BE INITIATED SOON ⚠️🚫."
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -738,6 +738,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
