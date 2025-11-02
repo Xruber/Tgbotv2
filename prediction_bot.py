@@ -633,7 +633,7 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
             chat_id=ADMIN_ID,
             text=admin_loss_message,
             )
-    else:
+        
         if new_streak >= 4:
             message = f"❌ Loss streak reached {new_streak}. The next prediction will be a **SURESHOT**! Please provide the next Period Number."
         else:
@@ -738,6 +738,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
