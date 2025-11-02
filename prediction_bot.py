@@ -603,8 +603,10 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    # 🆕 FIX: Define user_name here
+    
+    # 💡 FIX 1: Define user_name from the update object
     user_name = query.from_user.full_name 
+    
     feedback = query.data.split("_")[-1]  # 'win' or 'loss'
     
     user_data = get_user_data(user_id)
@@ -622,20 +624,24 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
         new_streak = current_streak + 1
         update_user_field(user_id, "loss_streak", new_streak)
         
+        # 💡 FIX 2 & 3: Corrected logic for new_streak > 4
         if new_streak > 4:
+            # Message for the USER
             message = f"🚫⚠️ 5 LEVEL HAS CROSSED. ADMIN IS NOTIFIED & REFUND WILL BE INITIATED SOON ⚠️🚫."
-            admin_loss_message = ( # 💡 FIX: Correct indentation
-            "🚨 ALERT 🚨\n\n"
-            f"User: [{user_name}](tg://user?id={user_id})\n" # 💡 FIX: 'user_name' is now defined
-            f"User ID: `{user_id}`\n"
-            f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
+            
+            # Message for the ADMIN
+            admin_loss_message = (
+                "🚨 ALERT 🚨\n\n"
+                f"User: [{user_name}](tg://user?id={user_id})\n" # user_name is now defined
+                f"User ID: `{user_id}`\n"
+                f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
             )
          
-            await context.bot.send_message( # 💡 FIX: Correct indentation
+            await context.bot.send_message( # Send the admin message
                 chat_id=ADMIN_ID,
                 text=admin_loss_message,
-                )
-        else: # 💡 FIX: Correct 'else' placement and indentation
+            )
+        else: # Handle loss streaks 1, 2, 3, or 4
             if new_streak >= 4:
                 message = f"❌ Loss streak reached {new_streak}. The next prediction will be a **SURESHOT**! Please provide the next Period Number."
             else:
@@ -645,6 +651,7 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
         return ConversationHandler.END
 
     # Edit the feedback message and prompt for the next period number
+    # This message is sent to the USER regardless of the streak value
     await query.edit_message_text(
         f"You recorded a **{feedback.upper()}** for the last prediction.\n\n{message}\n\n{PREDICTION_PROMPT}",
         parse_mode="Markdown"
@@ -740,6 +747,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
