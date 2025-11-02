@@ -603,6 +603,8 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+    # 🆕 FIX: Define user_name here
+    user_name = query.from_user.full_name 
     feedback = query.data.split("_")[-1]  # 'win' or 'loss'
     
     user_data = get_user_data(user_id)
@@ -621,24 +623,23 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
         update_user_field(user_id, "loss_streak", new_streak)
         
         if new_streak > 4:
-        	message = f"🚫⚠️ 5 LEVEL HAS CROSSED. ADMIN IS NOTIFIED & REFUND WILL BE INITIATED SOON ⚠️🚫."
-       admin_loss_message = (
-            "🚨 ALERT 🚨\n\n"                 
-           f"User: [{user_name}](tg://user?id={user_id})\n"
-           f"User ID: `{user_id}`\n"
-           f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
-        )
-        
-        try:
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_loss_message,
+            message = f"🚫⚠️ 5 LEVEL HAS CROSSED. ADMIN IS NOTIFIED & REFUND WILL BE INITIATED SOON ⚠️🚫."
+            admin_loss_message = ( # 💡 FIX: Correct indentation
+            "🚨 ALERT 🚨\n\n"
+            f"User: [{user_name}](tg://user?id={user_id})\n" # 💡 FIX: 'user_name' is now defined
+            f"User ID: `{user_id}`\n"
+            f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
             )
-        
-        if new_streak >= 4:
-            message = f"❌ Loss streak reached {new_streak}. The next prediction will be a **SURESHOT**! Please provide the next Period Number."
-        else:
-            message = f"📉 Loss streak is now {new_streak}. Continuing with the recovery pattern. What is the next Period Number?"
+         
+            await context.bot.send_message( # 💡 FIX: Correct indentation
+                chat_id=ADMIN_ID,
+                text=admin_loss_message,
+                )
+        else: # 💡 FIX: Correct 'else' placement and indentation
+            if new_streak >= 4:
+                message = f"❌ Loss streak reached {new_streak}. The next prediction will be a **SURESHOT**! Please provide the next Period Number."
+            else:
+                message = f"📉 Loss streak is now {new_streak}. Continuing with the recovery pattern. What is the next Period Number?"
     else:
         await query.edit_message_text("Invalid feedback received. Please use /start to refresh.")
         return ConversationHandler.END
@@ -739,6 +740,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
