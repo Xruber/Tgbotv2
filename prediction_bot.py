@@ -24,7 +24,7 @@ BOT_TOKEN = os.getenv("", "YOUR_TELEGRAM_BOT_TOKEN")
 # Replace with your MongoDB connection string (e.g., "mongodb+srv://user:pass@cluster.mongodb.net/dbname")
 MONGO_URI = os.getenv("", "YOUR_MONGO_DB_CONNECTION_STRING")
 # Replace with the actual chat ID of the administrator
-ADMIN_ID = int(os.getenv("6239774927", "YOUR_ADMIN_CHAT_ID"))
+ADMIN_ID = int(os.getenv("", "YOUR_ADMIN_CHAT_ID"))
 
 # Set up logging
 logging.basicConfig(
@@ -722,4 +722,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
     
