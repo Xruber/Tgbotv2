@@ -353,13 +353,6 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         "Please check your bank records and confirm the payment. Click Accept to grant access."
     )
 
-    admin_loss_message = (
-        "🚨 ALERT 🚨\n\n"
-        f"User: [{user_name}](tg://user?id={user_id})\n"
-        f"User ID: `{user_id}`\n"
-        f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
-    )
-
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -629,6 +622,13 @@ async def handle_prediction_feedback(update: Update, context: ContextTypes.DEFAU
         
         if new_streak > 4:
         	message = f"🚫⚠️ 5 LEVEL HAS CROSSED. ADMIN IS NOTIFIED & REFUND WILL BE INITIATED SOON ⚠️🚫."
+            admin_loss_message = (
+        "🚨 ALERT 🚨\n\n"
+        f"User: [{user_name}](tg://user?id={user_id})\n"
+        f"User ID: `{user_id}`\n"
+        f"5 LEVEL HAS BEEN CROSSED FOR THE USER INTIATE THE REFUND IF POSSIBLE"
+        )
+        try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=admin_loss_message,
@@ -738,6 +738,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
