@@ -524,13 +524,23 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
 
 
-async def receive_period_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+
+    async def receive_period_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Receives the period number and generates the pattern-based prediction."""
     period_number_str = update.message.text.strip()
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
     loss_streak = user_data.get("loss_streak", 0)
-    
+
+    # 🛑 START OF FIX: Re-check subscription status
+    if not is_subscription_active(user_data):
+        # 1. Inform the user
+        await update.message.reply_text(
+            "❌ **Access Denied/Expired.** Your subscription is no longer active. Please use /start to renew your prediction package.",
+            reply_markup=get_prediction_keyboard(user_data)
+        )
+        # 2. End the conversation so they can't send another period number
+        return ConversationHandler.END
     # Basic validation: check if it's a number
     try:
         period_number = int(period_number_str)
@@ -747,6 +757,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
