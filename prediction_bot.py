@@ -526,7 +526,6 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
     async def receive_period_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receives the period number and generates the pattern-based prediction."""
     period_number_str = update.message.text.strip()
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
@@ -757,6 +756,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
