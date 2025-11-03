@@ -525,11 +525,11 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 
-    async def receive_period_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    period_number_str = update.message.text.strip()
-    user_id = update.effective_user.id
-    user_data = get_user_data(user_id)
-    loss_streak = user_data.get("loss_streak", 0)
+ async def receive_period_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+     period_number_str = update.message.text.strip()
+     user_id = update.effective_user.id
+     user_data = get_user_data(user_id)
+     loss_streak = user_data.get("loss_streak", 0)
 
     # 🛑 START OF FIX: Re-check subscription status
     if not is_subscription_active(user_data):
@@ -756,6 +756,7 @@ if __name__ == "__main__":
     main()
 
     
+
 
 
 
