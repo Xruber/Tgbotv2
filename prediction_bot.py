@@ -772,7 +772,7 @@ def main() -> None:
     
     # 🆕 Add the database dependencies to the application context 
     # so they can be accessed by functions in referral_system.py
-    if users_collection:
+    if users_collection is not None:
         application.user_data_accessors = {
             'users_collection': users_collection,
             'update_user_field': update_user_field,
@@ -848,4 +848,5 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
     main()
