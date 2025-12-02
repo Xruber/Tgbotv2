@@ -87,8 +87,8 @@ PREDICTION_PLANS = {
 # --- NEW: Advanced Prediction & Martingale Constants (from game_helper_bot.py) ---
 BETTING_SEQUENCE = [1, 2, 4, 8, 16, 32] # Martingale betting units
 MAX_LEVEL = len(BETTING_SEQUENCE)       # Maximum level (6)
-MAX_HISTORY_LENGTH = 5                  # How many past results to track for pattern matching
-PATTERN_PROBABILITY = 0.6               # 60% chance to follow Martingale trend on a Loss
+MAX_HISTORY_LENGTH = 3                  # How many past results to track for pattern matching
+PATTERN_PROBABILITY = 0.8               # 60% chance to follow Martingale trend on a Loss
 
 ALL_PATTERNS = [
     (['Small', 'Small', 'Big', 'Big'], "SSBB"),
@@ -1009,5 +1009,6 @@ if __name__ == "__main__":
 
 
     main()
+
 
 
