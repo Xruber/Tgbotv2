@@ -204,7 +204,7 @@ def get_bet_unit(level: int) -> int:
         return BETTING_SEQUENCE[level - 1]
     return 1 # Default to 1 if level is out of bounds
 
-def get_next_pattern_prediction(history: list) -> tuple[str | None, str]:
+def get_next_pattern_prediction(history: list) -> tuple[Optional[str], str]:
     """
     Analyzes the history to find the best matching pattern and determines the next prediction.
     Returns (next_prediction, pattern_name).
@@ -1009,4 +1009,5 @@ if __name__ == "__main__":
 
 
     main()
+
 
