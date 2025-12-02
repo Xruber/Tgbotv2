@@ -584,8 +584,6 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     update_user_field(user_id, "last_utr", utr)
     update_user_field(user_id, "prediction_status", "ADMIN_REVIEW")
     
-    # --- 3. Inform User (This is the message you are NOT seeing) ---
-    try:
         await update.message.reply_text(
             f"**Payment Notification Received!**\n\n"
             f"Your payment (UTR: `{utr}`) is now under review by the administrator.\n"
@@ -1017,5 +1015,6 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
 
     main()
