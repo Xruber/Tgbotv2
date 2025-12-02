@@ -586,7 +586,8 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await update.message.reply_text(
         f"**Payment Notification Received!**\n\n"
         f"Your payment (UTR: `{utr}`) is now under review by the administrator.\n"
-        "You will receive a notification once your access is approved."
+        "You will receive a notification once your access is approved.",
+        parse_mode="Markdown",
     )
     
     # 2. Alert Admin
@@ -1009,6 +1010,7 @@ if __name__ == "__main__":
 
 
     main()
+
 
 
 
