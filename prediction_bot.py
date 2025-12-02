@@ -656,7 +656,7 @@ async def admin_accept_request(update: Update, context: ContextTypes.DEFAULT_TYP
     # No need for a conversation state change, as this is a single action
     return ConversationHandler.END
     
-    async def admin_reject_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_reject_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin clicks REJECT."""
     query = update.callback_query
     await query.answer("Rejecting request...")
@@ -1005,5 +1005,6 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
 
     main()
