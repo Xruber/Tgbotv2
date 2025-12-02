@@ -3,6 +3,7 @@ import os
 import time
 import random # ⬅️ ADDED: Required for pattern logic
 from datetime import datetime, timedelta
+from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
@@ -1008,3 +1009,4 @@ if __name__ == "__main__":
 
 
     main()
+
