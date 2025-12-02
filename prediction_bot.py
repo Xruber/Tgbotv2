@@ -584,19 +584,12 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     update_user_field(user_id, "last_utr", utr)
     update_user_field(user_id, "prediction_status", "ADMIN_REVIEW")
     
-        await update.message.reply_text(
-            f"**Payment Notification Received!**\n\n"
-            f"Your payment (UTR: `{utr}`) is now under review by the administrator.\n"
-            "You will receive a notification once your access is approved.",
-            parse_mode="Markdown", 
-        )
-    except Exception as e:
-        # If this fails, the error is likely that the bot cannot reply to the user.
-        logger.error(f"FATAL: Could not send confirmation to user {user_id}. Error: {e}")
-        # We still return END, even on failure, to close the conversation state.
-        return ConversationHandler.END
-
-
+    await update.message.reply_text(
+        f"**Payment Notification Received!**\n\n"
+        f"Your payment (UTR: `{utr}`) is now under review by the administrator.\n"
+        "You will receive a notification once your access is approved.",
+    )
+            
     # --- 4. Alert Admin (This often fails due to bad ADMIN_ID or permissions) ---
     admin_keyboard = InlineKeyboardMarkup(
         [
@@ -1018,3 +1011,4 @@ if __name__ == "__main__":
 
 
     main()
+
