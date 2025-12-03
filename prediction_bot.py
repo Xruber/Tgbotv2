@@ -584,7 +584,7 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     update_user_field(user_id, "prediction_status", "ADMIN_REVIEW")
     
     # 1. Inform User (Acknowledge UTR)
-    await update.message.reply_text(
+    await context.bot.send_message(
         f"**Payment Notification Received!**\n\n"
         f"Your payment (UTR: `{utr}`) is now under review by the administrator.\n"
         "You will receive a notification once your access is approved."
@@ -1012,5 +1012,6 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
 
     main()
