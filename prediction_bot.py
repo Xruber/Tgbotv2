@@ -549,7 +549,21 @@ async def admin_accept_request(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer("Granting access...")
 
     # Extract the user ID and plan key from callback data (e.g., 'admin_accept_12345_7_day')
-    _, _, buyer_id_str, plan_key = query.data.split("_")
+    # Use * to catch all leading parts, preventing "too many values to unpack" error.
+    try:
+        *_, buyer_id_str, plan_key = query.data.split("_")
+    except ValueError:
+        await query.edit_message_text("Error: Could not parse callback data. This usually means the button data was corrupted. User status reset.")
+        # Attempt to get the ID if it's the 3rd part before the error
+        try:
+            buyer_id_str = query.data.split("_")[2]
+            buyer_id = int(buyer_id_str)
+            update_user_field(buyer_id, "prediction_status", "NONE")
+        except:
+             pass # Silently fail if ID is also unrecoverable
+        return ConversationHandler.END
+
+
     buyer_id = int(buyer_id_str)
 
     if not plan_key or plan_key not in PREDICTION_PLANS:
@@ -854,4 +868,5 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
     main()
