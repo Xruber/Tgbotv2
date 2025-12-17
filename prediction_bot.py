@@ -66,7 +66,7 @@ ALL_PATTERNS = [
     (['Big', 'Small', 'Small', 'Big'], "BSSB"),
 ]
 MAX_HISTORY_LENGTH = 5 # Longest pattern is 5 steps
-PATTERN_PROBABILITY = 0.5 
+PATTERN_PROBABILITY = 0.8 
 
 # Enable logging
 logging.basicConfig(
@@ -873,4 +873,5 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
     main()
