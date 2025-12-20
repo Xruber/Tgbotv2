@@ -10,7 +10,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 
 # --- Constants ---
 REGISTER_LINK = "https://t.me/+pR0EE-BzatNjZjNl" 
-PAYMENT_IMAGE_URL = "https://discord.com/channels/888361275015462963/888361275464220733/1451949299083509844"
+PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/888361275464220733/1451949298928455831/Screenshot_20251029-1135273.png?ex=694808a8&is=6946b728&hm=2b920f75e28d14bf4aa34e27193217c3a0e61a2f0ff782378f787d22898e84a3&"
 PREDICTION_PROMPT = "➡️ **Please reply to this message with the Period Number** for which you want the next prediction."
 
 # --- Plans ---
@@ -38,3 +38,4 @@ ALL_PATTERNS = [
     (['Big', 'Small', 'Small', 'Big'], "BSSB"),
 
 ]
+
