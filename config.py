@@ -46,6 +46,5 @@ ALL_PATTERNS = [
     (['Small', 'Small', 'Big', 'Big'], "SSBB"),
     (['Big', 'Small', 'Big', 'Small'], "BSBS"),
     (['Small', 'Big', 'Small', 'Big'], "SBSB"),
-    (['Small', 'Big', 'Big', 'Small'], "SBBS"), # NEW
-    (['Big', 'Small', 'Small', 'Big'], "BSSB"), # NEW
+
 ]
