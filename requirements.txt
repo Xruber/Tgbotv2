@@ -2,3 +2,4 @@ python-telegram-bot
 pymongo
 python-dotenv
 python-telegram-bot[job-queue]
+requests
