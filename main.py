@@ -133,33 +133,26 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]
         ])
         await query.edit_message_text(
-            "🧂 **SALT CHECKER**\n"
+            "🧂 **SALT CHECKER (SAFE MODE)**\n"
             "━━━━━━━━━━━━━━\n"
-            "Select a game mode to open the **Live Monitor**.\n"
-            "The bot will update the message automatically after every period.",
+            "This monitor prioritizes salts with **< 5 Losses in a row**.\n\n"
+            "Select a game mode to open the **Live Monitor**.",
             reply_markup=kb, parse_mode="Markdown"
         )
         
     elif data == "adm_salt_live_30s":
-        # Launch the Live Monitor Loop
         asyncio.create_task(live_salt_monitor(query, context, "30s"))
 
     elif data == "adm_salt_live_1m":
-        # Launch the Live Monitor Loop
         asyncio.create_task(live_salt_monitor(query, context, "1m"))
-
     # --- END SALT MENUS ---
 
     elif data == "adm_back":
         await show_admin_dashboard(query, context, is_callback=True)
 
 async def live_salt_monitor(query_obj, context, game_type):
-    """
-    Infinite loop that edits the message every few seconds to show live results.
-    Stops when the message is deleted or 'Back' is clicked.
-    """
+    """Infinite loop showing Safe Salt results."""
     try:
-        # Initial Message
         await query_obj.edit_message_text(
             f"⏳ **INITIALIZING MONITOR ({game_type})...**\n"
             f"━━━━━━━━━━━━━━\n"
@@ -167,33 +160,41 @@ async def live_salt_monitor(query_obj, context, game_type):
             parse_mode="Markdown"
         )
         
-        # Monitor Loop
         while True:
-            # 1. Fetch Data from Global Variable
+            # 1. Fetch Data
             res = LATEST_RESULTS.get(game_type, {})
             salt = res.get('salt', 'Scanning...')
             acc = res.get('acc', 0.0)
             scanned = res.get('total_scanned', 0)
             period = res.get('current_period', 'Wait...')
+            max_streak = res.get('max_streak', 0)
+            is_safe = res.get('is_safe', False)
             last_upd = res.get('last_update', 'Now')
             
-            # 2. Build Message (High-End UI)
+            # 2. Build Message
             bar = draw_bar(acc/100, length=10, style="blocks")
             
+            # Safety Status String
+            if salt == "Scanning..." or salt == "Initializing...":
+                safe_str = "🔄 Scanning..."
+            elif is_safe:
+                safe_str = "✅ SAFE (Loss < 5)"
+            else:
+                safe_str = "⚠️ RISK (Loss ≥ 5)"
+
             msg = (
                 f"🧂 **LIVE SALT MONITOR** ({game_type.upper()})\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"📅 **Current Period:** `{period}`\n"
-                f"🔢 **Scanned:** `{scanned}/1000` (Rolling)\n"
+                f"📅 **Period:** `{period}`\n"
+                f"🔢 **Data:** `{scanned}/1000` (Rolling)\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"🏆 **BEST SALT FOUND:**\n"
-                f"🔑 `{salt}`\n"
+                f"🏆 **BEST SALT:** `{salt}`\n"
+                f"🛡 **Status:** {safe_str}\n"
+                f"📉 **Max Loss Streak:** `{max_streak}`\n"
                 f"━━━━━━━━━━━━━━\n"
                 f"🔥 **Accuracy:** {acc}%\n"
                 f"{bar}\n"
-                f"🕒 **Last Update:** {last_upd}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"⚠️ _Updating live after each period..._"
+                f"🕒 **Last Update:** {last_upd}"
             )
             
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close / Stop", callback_data="adm_back")]])
@@ -203,13 +204,12 @@ async def live_salt_monitor(query_obj, context, game_type):
                 await query_obj.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
             except error.BadRequest as e:
                 if "Message is not modified" in str(e):
-                    pass # Ignore if data hasn't changed yet
+                    pass 
                 else:
-                    break # Message deleted or other error -> Stop Loop
+                    break 
             except Exception as e:
-                break # Stop Loop on any other error
+                break 
             
-            # 4. Wait before next refresh
             await asyncio.sleep(2)
             
     except Exception as e:
