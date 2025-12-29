@@ -21,7 +21,6 @@ from database import (
 )
 from prediction_engine import process_prediction_request, get_bet_unit, get_number_for_outcome, get_v5_logic
 from target_engine import start_target_session, process_target_outcome
-from salt_service import start_salt_service, LATEST_RESULTS
 from api_helper import get_game_data
 
 # --- STATES ---
@@ -34,31 +33,42 @@ logger = logging.getLogger(__name__)
 
 # ---   VISUAL UTILS ---
 def draw_bar(percent, length=10, style="blocks"):
+    """Generates a high-end text progress bar with emojis."""
     percent = max(0.0, min(1.0, percent))
     filled_len = int(length * percent)
+    
     if style == "blocks":
         bar = "█" * filled_len + "░" * (length - filled_len)
     elif style == "circles":
         bar = "🟢" * filled_len + "⚪" * (length - filled_len)
     elif style == "risk":
+        # Gradient: Green -> Yellow -> Red
         if percent < 0.4: c = "🟢"
         elif percent < 0.7: c = "🟡"
         else: c = "🔴"
         bar = c * filled_len + "⚪" * (length - filled_len)
     else:
         bar = "█" * filled_len + " " * (length - filled_len)
+        
     return f"[{bar}] {int(percent * 100)}%"
 
 def get_confidence_score(mode, pattern, level):
+    """Calculates dynamic confidence for the UI."""
     base = 0.65
     if mode == "V5": base += 0.20 
     elif mode == "V4": base += 0.10
+    
+    # Random fluctuation to look 'live'
     fluc = random.uniform(-0.05, 0.05)
+    
+    # Higher level = Higher risk = Lower 'safety' confidence
     level_penalty = (level - 1) * 0.05
+    
     return max(0.40, min(0.99, base + fluc - level_penalty))
 
 # ---   ADMIN DASHBOARD ---
 async def show_admin_dashboard(update_obj, context, is_callback=False):
+    """Helper to show admin menu."""
     total_users = get_total_users()
     active_subs = get_active_subs_count()
     
@@ -71,13 +81,11 @@ async def show_admin_dashboard(update_obj, context, is_callback=False):
         f"━━━━━━━━━━━━━━\n"
         f"⚙️ **Services:**\n"
         f"🔹 API Connector\n"
-        f"🔹 Salt Cracker (Background)\n"
         f"━━━━━━━━━━━━━━\n"
         f"👇 Select Action:"
     )
     
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧂 Salt Checker", callback_data="adm_salt_menu")],
         [InlineKeyboardButton("📢 Broadcast Message", callback_data="adm_broadcast")],
         [InlineKeyboardButton("📊 System Stats", callback_data="adm_stats_detail")],
         [InlineKeyboardButton("❌ Close", callback_data="adm_close")]
@@ -90,10 +98,12 @@ async def show_admin_dashboard(update_obj, context, is_callback=False):
         await update_obj.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Opens the Admin Control Panel."""
     if update.effective_user.id != ADMIN_ID: return
     await show_admin_dashboard(update, context, is_callback=False)
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles Admin Menu clicks (General)."""
     query = update.callback_query
     if update.effective_user.id != ADMIN_ID: return
     await query.answer()
@@ -107,111 +117,17 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📊 **DETAILED STATISTICS**\n\n"
             "🔹 V5 Engine Accuracy: **92%**\n"
             "🔹 Top Plan: **7 Day Access**\n"
-            "🔹 Server Load: **Normal**\n"
-            "🔹 Salt Service: **Active**",
+            "🔹 Server Load: **Normal**",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]])
         )
-
-    # --- SALT CHECKER MENUS ---
-    elif data == "adm_salt_menu":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🕒 Wingo 30s", callback_data="adm_salt_live_30s"), InlineKeyboardButton("🕐 Wingo 1m", callback_data="adm_salt_live_1m")],
-            [InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]
-        ])
-        await query.edit_message_text(
-            "🧂 **SALT CHECKER (SAFE MODE)**\n"
-            "━━━━━━━━━━━━━━\n"
-            "This monitor prioritizes salts with **< 5 Losses in a row**.\n\n"
-            "Select a game mode to open the **Live Monitor**.",
-            reply_markup=kb, parse_mode="Markdown"
-        )
-        
-    elif data == "adm_salt_live_30s":
-        asyncio.create_task(live_salt_monitor(query, context, "30s"))
-
-    elif data == "adm_salt_live_1m":
-        asyncio.create_task(live_salt_monitor(query, context, "1m"))
 
     elif data == "adm_back":
         await show_admin_dashboard(query, context, is_callback=True)
 
-async def live_salt_monitor(query_obj, context, game_type):
-    """Infinite loop showing Safe Salt results with Anti-Flood & Heartbeat."""
-    try:
-        await query_obj.edit_message_text(
-            f"⏳ **INITIALIZING MONITOR ({game_type})...**\n"
-            f"━━━━━━━━━━━━━━\n"
-            "Connecting to background worker...",
-            parse_mode="Markdown"
-        )
-        
-        # Toggle boolean to flip the icon every update
-        # This makes the message "different" every time, solving the 400 Bad Request error.
-        heartbeat = True 
-        
-        while True:
-            # 1. Fetch Data
-            res = LATEST_RESULTS.get(game_type, {})
-            salt = res.get('salt', 'Scanning...')
-            acc = res.get('acc', 0.0)
-            scanned = res.get('total_scanned', 0)
-            period = res.get('current_period', 'Wait...')
-            max_streak = res.get('max_streak', 0)
-            is_safe = res.get('is_safe', False)
-            last_upd = res.get('last_update', 'Now')
-            
-            # 2. Build Message
-            bar = draw_bar(acc/100, length=10, style="blocks")
-            
-            if salt == "Scanning..." or salt == "Initializing...":
-                safe_str = "🔄 Scanning..."
-            elif is_safe:
-                safe_str = "✅ SAFE (Loss < 5)"
-            else:
-                safe_str = "⚠️ RISK (Loss ≥ 5)"
-
-            # TOGGLE ICON (Heartbeat)
-            beat_icon = "🟢" if heartbeat else "⚪"
-            heartbeat = not heartbeat
-
-            msg = (
-                f"🧂 **LIVE SALT MONITOR** ({game_type.upper()})\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"📅 **Period:** `{period}`\n"
-                f"🔢 **Data:** `{scanned}/1000` (Rolling)\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"🏆 **BEST SALT:** `{salt}`\n"
-                f"🛡 **Status:** {safe_str}\n"
-                f"📉 **Max Loss Streak:** `{max_streak}`\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"🔥 **Accuracy:** {acc}%\n"
-                f"{bar}\n"
-                f"🕒 **Last Update:** {last_upd} {beat_icon}"
-            )
-            
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close / Stop", callback_data="adm_back")]])
-            
-            # 3. Edit Message
-            try:
-                await query_obj.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
-            except error.BadRequest as e:
-                # If message is same, ignore. If deleted, stop loop.
-                if "Message is not modified" in str(e):
-                    pass 
-                else:
-                    break 
-            except Exception as e:
-                break 
-            
-            # --- 15 SECOND INTERVAL ---
-            await asyncio.sleep(15)
-            
-    except Exception as e:
-        logger.error(f"Live Monitor Error: {e}")
-
 # --- BROADCAST SYSTEM ---
 
 async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for Broadcast conversation."""
     query = update.callback_query
     if update.effective_user.id != ADMIN_ID: return ConversationHandler.END
     await query.answer()
@@ -224,6 +140,7 @@ async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TY
     return ADMIN_BROADCAST_MSG
 
 async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends the actual broadcast to ALL users with SAFETY EXIT."""
     if update.effective_user.id != ADMIN_ID: return ConversationHandler.END
     
     msg_text = update.message.text
@@ -234,6 +151,7 @@ async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYP
     count = 0
     blocked = 0
     
+    # SAFETY BLOCK
     try:
         users_cursor = get_all_user_ids()
         
@@ -241,8 +159,11 @@ async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYP
             try:
                 await context.bot.send_message(chat_id=user_doc['user_id'], text=final_msg, parse_mode="Markdown")
                 count += 1
+                # SLOW MODE: Sleeps 0.05s between messages
                 await asyncio.sleep(0.05) 
+                # Checkpoint every 20 messages
                 if count % 20 == 0: await asyncio.sleep(1) 
+
             except Exception as e:
                 blocked += 1
                 
@@ -255,15 +176,18 @@ async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
 async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Proper async cancellation function."""
     await update.message.reply_text("❌ **Broadcast Cancelled.**")
     return ConversationHandler.END
 
 # --- USER COMMANDS ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Main Menu with Daily Luck & Visuals."""
     user_id = update.effective_user.id
     user_data = get_user_data(user_id) 
     
+    # Referral Logic
     if context.args and not user_data.get("referred_by"):
         try:
             referrer_id = int(context.args[0])
@@ -275,15 +199,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     active = is_subscription_active(user_data)
     
+    #   DAILY LUCK METER
     today = datetime.datetime.now().day
-    random.seed(user_id + today) 
+    random.seed(user_id + today) # Fixed luck for the day
     luck_percent = random.uniform(0.45, 0.98)
     luck_bar = draw_bar(luck_percent, length=8, style="risk")
     random.seed()
     
+    # SUBSCRIPTION HEALTH BAR
     if active:
         expiry = user_data.get("expiry_timestamp", 0)
         now = datetime.datetime.now().timestamp()
+        # Assume 30 days max for bar visual
         total_dur = 30 * 24 * 3600
         rem = max(0, expiry - now)
         health_pct = min(1.0, rem / total_dur)
@@ -321,9 +248,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User Profile Card."""
     await show_user_stats(update, update.effective_user.id)
 
 async def show_user_stats(update_obj, user_id):
+    """Helper to display stats via message or callback."""
     ud = get_user_data(user_id)
     wins = ud.get("total_wins", 0)
     losses = ud.get("total_losses", 0)
@@ -356,6 +285,7 @@ async def show_user_stats(update_obj, user_id):
         await update_obj.message.reply_text(msg, parse_mode="Markdown")
 
 async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Return to main menu from callback."""
     await update.callback_query.message.delete()
     await start_command(update, context)
 
@@ -379,6 +309,7 @@ async def start_game_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_FEEDBACK
 
 async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Visually Rich Prediction Screen."""
     if update.callback_query:
         msg_func = update.callback_query.edit_message_text
         uid = update.callback_query.from_user.id
@@ -394,12 +325,14 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg_func("⚠️ **API Connection Failed.**\nRetrying...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Retry", callback_data="select_game_type")]]))
         return ConversationHandler.END
 
+    # --- TREND STRIP ---
     trend_viz = ""
     if hist:
-        recent = hist[-6:] 
+        recent = hist[-6:] # Last 6
         for h in recent:
             trend_viz += "🔴" if h['o'] == "Big" else "🟢"
     else: trend_viz = "Scanning..."
+    # -------------------
 
     mode = ud.get("prediction_mode", "V2")
     if mode == "V5":
@@ -417,6 +350,7 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conf = get_confidence_score(mode, pat, lvl)
     conf_bar = draw_bar(conf, length=8, style="blocks")
     
+    # RISK BAR
     risk_pct = lvl / MAX_LEVEL
     risk_bar = draw_bar(risk_pct, length=8, style="risk")
     
@@ -434,7 +368,7 @@ async def show_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🛡 **Confidence:**\n{conf_bar}\n"
         f"🔥 **Risk Level:**\n{risk_bar}\n"
         f"{shot_txt}\n"
-        f"⚖️ **Result?**\n"
+        f"⚖️ **Result?**"
         f"━━━━━━━━━━━━━━\n"
     )
     
@@ -589,7 +523,7 @@ async def grant_access(user_id, item_key, context):
             f"━━━━━━━━━━━━━━\n"
             f"👇 **Next Steps:**\n"
             f"1. Use /switch to choose your logic.\n"
-            f"2. Use /start to begin playing.\n"
+            f"2. Use /start to begin playing."
             f"━━━━━━━━━━━━━━\n"
         )
         
@@ -614,7 +548,7 @@ async def grant_access(user_id, item_key, context):
             f"🛑 **Stop Loss:** 0 (Bankrupt protection active)\n\n"
             f"━━━━━━━━━━━━━━\n"
             f"⚠️ **Important:** This is a one-time session. Do not close the bot until you reach the target.\n\n"
-            f"🚀 Type /target to begin.\n"
+            f"🚀 Type /target to begin."
             f"━━━━━━━━━━━━━━\n"
         )
 
@@ -628,6 +562,7 @@ async def switch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     curr = user_data.get("prediction_mode", "V2")
     
+    # Detailed descriptions
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"{'✅ ' if curr=='V1' else ''}V1: Pattern Matcher", callback_data="set_mode_V1")],
         [InlineKeyboardButton(f"{'✅ ' if curr=='V2' else ''}V2: Streak/Switch (Balanced)", callback_data="set_mode_V2")],
@@ -674,7 +609,7 @@ async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"1. Share your link with friends.\n"
         f"2. They buy a plan.\n"
         f"3. You earn **₹100** per sale!\n\n"
-        f"💡 _Payouts are processed manually. DM Support to claim._\n"
+        f"💡 _Payouts are processed manually. DM Support to claim._"
         f"━━━━━━━━━━━━━━\n",
         parse_mode="Markdown"
     )
@@ -753,6 +688,7 @@ async def display_target_step(update_obj, sess):
     current_bal = sess['current_balance']
     target_bal = sess['target_amount']
     
+    # Progress Calculation
     needed = target_bal - start_bal
     made = current_bal - start_bal
     pct = made / needed if needed > 0 else 0
@@ -761,6 +697,7 @@ async def display_target_step(update_obj, sess):
     profit_sign = "+" if made >= 0 else ""
     color = "🔴" if sess['current_prediction'] == "Big" else "🟢"
     
+    # Sequence Logic Display
     seq_idx = sess['current_level_index']
     seq = sess['sequence']
     bet_amt = seq[seq_idx] if seq_idx < len(seq) else seq[-1]
@@ -798,8 +735,18 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- MAIN ---
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Keep timeouts to prevent httpx errors in heavy loads
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .read_timeout(30)
+        .write_timeout(30)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
     
+    # Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", admin_command)) 
     app.add_handler(CommandHandler("stats", stats_command)) 
@@ -860,11 +807,8 @@ def main():
     app.add_handler(target_h)
 
     # Launch
-    print("  Starting Background Salt Cracker Service...")
-    start_salt_service()
-
-    print("  Bot Online.")
-    app.run_polling()
+    print("  Bot Online (Game Only).")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
