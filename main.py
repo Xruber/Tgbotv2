@@ -21,7 +21,6 @@ from database import (
 )
 from prediction_engine import process_prediction_request, get_bet_unit, get_number_for_outcome, get_v5_logic
 from target_engine import start_target_session, process_target_outcome
-# IMPORT LATEST_RESULTS for the Live Monitor
 from salt_service import start_salt_service, LATEST_RESULTS
 from api_helper import get_game_data
 
@@ -210,10 +209,13 @@ async def live_salt_monitor(query_obj, context, game_type):
             except Exception as e:
                 break 
             
-            await asyncio.sleep(2)
+            # SLOWED DOWN TO PREVENT FLOOD
+            await asyncio.sleep(5)
             
     except Exception as e:
         logger.error(f"Live Monitor Error: {e}")
+
+# --- BROADCAST SYSTEM (FIXED) ---
 
 async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Entry point for Broadcast conversation."""
@@ -229,28 +231,47 @@ async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TY
     return ADMIN_BROADCAST_MSG
 
 async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends the actual broadcast to ALL users."""
+    """Sends the actual broadcast to ALL users with SAFETY EXIT."""
     if update.effective_user.id != ADMIN_ID: return ConversationHandler.END
     
     msg_text = update.message.text
     final_msg = f"📢 **OFFICIAL ANNOUNCEMENT**\n━━━━━━━━━━━━━━\n{msg_text}\n━━━━━━━━━━━━━━"
     
-    status_msg = await update.message.reply_text("⏳ **Sending Broadcast...**")
+    status_msg = await update.message.reply_text("⏳ **Sending Broadcast... (This may take time)**")
     
-    # REAL BROADCAST LOGIC
-    users_cursor = get_all_user_ids()
     count = 0
     blocked = 0
     
-    for user_doc in users_cursor:
-        try:
-            await context.bot.send_message(chat_id=user_doc['user_id'], text=final_msg, parse_mode="Markdown")
-            count += 1
-            if count % 20 == 0: await asyncio.sleep(1) # Rate limit protection
-        except Exception as e:
-            blocked += 1
+    # SAFETY BLOCK: Ensures we leave the 'Broadcast Mode' even if a crash happens
+    try:
+        users_cursor = get_all_user_ids()
+        
+        for user_doc in users_cursor:
+            try:
+                await context.bot.send_message(chat_id=user_doc['user_id'], text=final_msg, parse_mode="Markdown")
+                count += 1
+                
+                # SLOW MODE: Sleeps 0.05s between messages to avoid flood bans
+                await asyncio.sleep(0.05) 
+                
+                # Checkpoint every 20 messages
+                if count % 20 == 0: await asyncio.sleep(1) 
+
+            except Exception as e:
+                blocked += 1
+                
+        await status_msg.edit_text(f"✅ **Broadcast Complete.**\nSent: {count}\nFailed/Blocked: {blocked}")
+
+    except Exception as e:
+        await status_msg.edit_text(f"⚠️ **Broadcast Interrupted.**\nError: {e}\nSent: {count}")
     
-    await status_msg.edit_text(f"✅ **Broadcast Complete.**\nSent: {count}\nFailed/Blocked: {blocked}")
+    finally:
+        # CRITICAL: This line forces the bot to exit Broadcast Mode no matter what.
+        return ConversationHandler.END
+
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Proper async cancellation function."""
+    await update.message.reply_text("❌ **Broadcast Cancelled.**")
     return ConversationHandler.END
 
 # --- USER COMMANDS ---
@@ -826,7 +847,7 @@ def main():
     broadcast_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_broadcast_entry, pattern="^adm_broadcast$")],
         states={ADMIN_BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_broadcast)]},
-        fallbacks=[CommandHandler("cancel", lambda u,c: ConversationHandler.END)]
+        fallbacks=[CommandHandler("cancel", cancel_broadcast)]
     )
     app.add_handler(broadcast_handler)
 
