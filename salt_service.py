@@ -8,10 +8,11 @@ from telegram import Bot
 from config import ADMIN_ID, BOT_TOKEN
 
 # --- CONFIGURATION ---
-TARGET_WINDOW_SIZE = 1000  # Keep exactly the last 1000 rounds
-MAX_COMBINATION_LENGTH = 3
+TARGET_WINDOW_SIZE = 1000  # Keep history of 1000
+ANALYSIS_SUBSET_SIZE = 100 # Only check the last 100 for live speed (Prevents lag)
+MAX_COMBINATION_LENGTH = 2 # Reduced to 2 for speed (Length 3 is too slow for Python)
 
-# GLOBAL STORAGE - Main.py reads this for the Live Monitor
+# GLOBAL STORAGE
 LATEST_RESULTS = {
     "30s": {
         "salt": "Initializing...", 
@@ -33,7 +34,7 @@ LATEST_RESULTS = {
 URL_30S = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 URL_1M = "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
 
-# Wordlist (Your original list)
+# Wordlist
 SALTS = [
     "admin", "sb", "wingo", "manager", "developer", "test",
     "123456", "password", "secret", "key", "public", "private",
@@ -54,7 +55,7 @@ class SaltCrackerWorker(threading.Thread):
         self.api_url = api_url
         self.bot = Bot(token=bot_token)
         self.admin_id = admin_id
-        self.history = [] # Sliding window of history
+        self.history = [] 
         self.running = True
 
     def get_prediction(self, period, salt):
@@ -74,8 +75,9 @@ class SaltCrackerWorker(threading.Thread):
             ts = int(time.time() * 1000)
             url = f"{self.api_url}?ts={ts}&page=1&size=10"
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.92lottery.com/"
+                "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                "Referer": "https://www.92lottery.com/",
+                "Origin": "https://www.92lottery.com"
             }
             resp = requests.get(url, headers=headers, timeout=10)
             data = resp.json()
@@ -90,31 +92,38 @@ class SaltCrackerWorker(threading.Thread):
                         'p': period, 
                         'r': "Small" if int(item['number']) <= 4 else "Big"
                     })
-            # Return reversed so we process oldest -> newest if multiple come in
+            # Return reversed (Oldest -> Newest)
             return new_items[::-1] 
         except Exception as e:
             return []
 
     def analyze_window(self):
-        """Analyzes the current self.history window to find best salt."""
-        # Only analyze if we have enough data (e.g., at least 50 periods)
-        if len(self.history) < 50:
-            self.update_status(salt="Gathering Data...", acc=0)
+        """Analyzes a subset of history for live speed."""
+        total_history = len(self.history)
+        
+        # If less than 10 items, just wait
+        if total_history < 10:
+            self.update_status(salt="Gathering Data...", acc=0, count=total_history)
             return
+
+        # OPTIMIZATION: Only analyze the last 'ANALYSIS_SUBSET_SIZE' (100) items
+        # This keeps the bot responsive.
+        if total_history > ANALYSIS_SUBSET_SIZE:
+            analysis_set = self.history[-ANALYSIS_SUBSET_SIZE:]
+        else:
+            analysis_set = self.history
 
         best_score = -1
         best_salt = "None"
-        total = len(self.history)
         
-        # Fast Brute Force
-        # Note: If history is 1000 items, this loop runs 1000 times per salt.
+        # Brute Force (Length 1 and 2 only)
         for length in range(1, MAX_COMBINATION_LENGTH + 1):
             combos = itertools.product(SALTS, repeat=length)
             for combo in combos:
                 salt_candidate = "".join(combo)
                 
                 correct = 0
-                for item in self.history:
+                for item in analysis_set:
                     if self.get_prediction(item['p'], salt_candidate) == item['r']:
                         correct += 1
                 
@@ -122,17 +131,16 @@ class SaltCrackerWorker(threading.Thread):
                     best_score = correct
                     best_salt = salt_candidate
 
-        # Update the Global Variable immediately
-        acc = (best_score / total) * 100
-        self.update_status(best_salt, acc)
-        print(f"[{self.game_type}] ♻️ Window Updated | Period: {self.history[-1]['p']} | Best: {best_salt} ({acc:.2f}%)")
+        # Calculate Accuracy based on the subset we actually checked
+        acc = (best_score / len(analysis_set)) * 100
+        self.update_status(best_salt, acc, count=total_history)
 
-    def update_status(self, salt, acc):
+    def update_status(self, salt, acc, count):
         latest_period = self.history[-1]['p'] if self.history else "Waiting..."
         LATEST_RESULTS[self.game_type] = {
             "salt": salt,
             "acc": round(acc, 2),
-            "total_scanned": len(self.history),
+            "total_scanned": count, # Shows 1000 if we have 1000
             "current_period": latest_period,
             "last_update": time.strftime("%H:%M:%S")
         }
@@ -149,20 +157,21 @@ class SaltCrackerWorker(threading.Thread):
                     for item in new_items:
                         self.history.append(item)
                     
-                    # Trim to keep only last 1000
+                    # Trim to keep only last TARGET_WINDOW_SIZE (1000)
                     if len(self.history) > TARGET_WINDOW_SIZE:
-                        # Remove oldest
                         self.history = self.history[-TARGET_WINDOW_SIZE:]
                     
                     # 2. TRIGGER ANALYSIS IMMEDIATELY
-                    # Since data changed, the "best salt" might have changed
+                    self.analyze_window()
+                
+                # If we have history but no new items, ensure we aren't stuck on "Initializing"
+                elif len(self.history) > 0 and LATEST_RESULTS[self.game_type]['salt'] == "Initializing...":
                     self.analyze_window()
 
             except Exception as e:
                 print(f"Worker Error {self.game_type}: {e}")
 
             # 3. Wait
-            # Polling speed
             time.sleep(3 if self.game_type == "30s" else 5)
 
 def start_salt_service():
