@@ -139,10 +139,13 @@ class SaltCrackerWorker(threading.Thread):
                             max_loss_streak = curr_loss_streak
                 
                 accuracy = correct / len(analysis_set)
-                is_safe = 1 if max_loss_streak < 5 else 0 # 1 = True (Good), 0 = False (Bad)
                 
-                # Logic: We prefer Safe (1) over Unsafe (0).
-                # If both are safe, we prefer higher accuracy.
+                # === HERE IS THE LEVEL 5 CHECK ===
+                # If max_loss_streak is less than 5, it is considered SAFE (1)
+                # If it is 5 or more, it is RISKY (0)
+                is_safe = 1 if max_loss_streak < 5 else 0 
+                
+                # We sort by Safety First (1 vs 0), then by Accuracy
                 metric = (is_safe, accuracy)
                 
                 if metric > best_metric:
