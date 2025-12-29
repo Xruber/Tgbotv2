@@ -9,14 +9,16 @@ from config import ADMIN_ID, BOT_TOKEN
 
 # --- CONFIGURATION ---
 TARGET_WINDOW_SIZE = 1000  # Keep history of 1000
-ANALYSIS_SUBSET_SIZE = 100 # Only check the last 100 for live speed (Prevents lag)
-MAX_COMBINATION_LENGTH = 2 # Reduced to 2 for speed (Length 3 is too slow for Python)
+ANALYSIS_SUBSET_SIZE = 100 # Analyze last 100 for live speed (prevents lag)
+MAX_COMBINATION_LENGTH = 2 # Length 2 is optimal for speed
 
 # GLOBAL STORAGE
 LATEST_RESULTS = {
     "30s": {
         "salt": "Initializing...", 
         "acc": 0.0, 
+        "max_streak": 0,
+        "is_safe": False,
         "total_scanned": 0,
         "current_period": "Waiting...",
         "last_update": "..."
@@ -24,6 +26,8 @@ LATEST_RESULTS = {
     "1m": {
         "salt": "Initializing...", 
         "acc": 0.0, 
+        "max_streak": 0,
+        "is_safe": False,
         "total_scanned": 0,
         "current_period": "Waiting...",
         "last_update": "..."
@@ -98,49 +102,66 @@ class SaltCrackerWorker(threading.Thread):
             return []
 
     def analyze_window(self):
-        """Analyzes a subset of history for live speed."""
+        """Finds best salt with PRIORITY on Max Streak < 5."""
         total_history = len(self.history)
-        
-        # If less than 10 items, just wait
         if total_history < 10:
-            self.update_status(salt="Gathering Data...", acc=0, count=total_history)
+            self.update_status("Gathering Data...", 0, 0, False, total_history)
             return
 
-        # OPTIMIZATION: Only analyze the last 'ANALYSIS_SUBSET_SIZE' (100) items
-        # This keeps the bot responsive.
+        # Optimization: Analyze subset for speed
         if total_history > ANALYSIS_SUBSET_SIZE:
             analysis_set = self.history[-ANALYSIS_SUBSET_SIZE:]
         else:
             analysis_set = self.history
 
-        best_score = -1
+        best_metric = (-1, -1) # Tuple: (is_safe, accuracy)
         best_salt = "None"
+        best_stats = (0, 0) # (max_streak, is_safe)
         
-        # Brute Force (Length 1 and 2 only)
+        # Brute Force
         for length in range(1, MAX_COMBINATION_LENGTH + 1):
             combos = itertools.product(SALTS, repeat=length)
             for combo in combos:
                 salt_candidate = "".join(combo)
                 
                 correct = 0
-                for item in analysis_set:
-                    if self.get_prediction(item['p'], salt_candidate) == item['r']:
-                        correct += 1
+                curr_loss_streak = 0
+                max_loss_streak = 0
                 
-                if correct > best_score:
-                    best_score = correct
+                for item in analysis_set:
+                    pred = self.get_prediction(item['p'], salt_candidate)
+                    if pred == item['r']:
+                        correct += 1
+                        curr_loss_streak = 0
+                    else:
+                        curr_loss_streak += 1
+                        if curr_loss_streak > max_loss_streak:
+                            max_loss_streak = curr_loss_streak
+                
+                accuracy = correct / len(analysis_set)
+                is_safe = 1 if max_loss_streak < 5 else 0 # 1 = True (Good), 0 = False (Bad)
+                
+                # Logic: We prefer Safe (1) over Unsafe (0).
+                # If both are safe, we prefer higher accuracy.
+                metric = (is_safe, accuracy)
+                
+                if metric > best_metric:
+                    best_metric = metric
                     best_salt = salt_candidate
+                    best_stats = (max_loss_streak, bool(is_safe))
 
-        # Calculate Accuracy based on the subset we actually checked
-        acc = (best_score / len(analysis_set)) * 100
-        self.update_status(best_salt, acc, count=total_history)
+        # Update Global
+        final_acc = best_metric[1] * 100 if best_metric[1] != -1 else 0
+        self.update_status(best_salt, final_acc, best_stats[0], best_stats[1], total_history)
 
-    def update_status(self, salt, acc, count):
+    def update_status(self, salt, acc, max_streak, is_safe, count):
         latest_period = self.history[-1]['p'] if self.history else "Waiting..."
         LATEST_RESULTS[self.game_type] = {
             "salt": salt,
             "acc": round(acc, 2),
-            "total_scanned": count, # Shows 1000 if we have 1000
+            "max_streak": max_streak,
+            "is_safe": is_safe,
+            "total_scanned": count,
             "current_period": latest_period,
             "last_update": time.strftime("%H:%M:%S")
         }
@@ -149,38 +170,30 @@ class SaltCrackerWorker(threading.Thread):
         print(f"✅ Live Service Started: Wingo {self.game_type}")
         while self.running:
             try:
-                # 1. Fetch New Data
+                # 1. Fetch
                 new_items = self.fetch_latest()
-                
                 if new_items:
-                    # Update Sliding Window
                     for item in new_items:
                         self.history.append(item)
                     
-                    # Trim to keep only last TARGET_WINDOW_SIZE (1000)
                     if len(self.history) > TARGET_WINDOW_SIZE:
                         self.history = self.history[-TARGET_WINDOW_SIZE:]
                     
-                    # 2. TRIGGER ANALYSIS IMMEDIATELY
                     self.analyze_window()
                 
-                # If we have history but no new items, ensure we aren't stuck on "Initializing"
                 elif len(self.history) > 0 and LATEST_RESULTS[self.game_type]['salt'] == "Initializing...":
-                    self.analyze_window()
+                     self.analyze_window()
 
             except Exception as e:
                 print(f"Worker Error {self.game_type}: {e}")
 
-            # 3. Wait
             time.sleep(3 if self.game_type == "30s" else 5)
 
 def start_salt_service():
-    # Worker 1: 30 Seconds
     worker_30 = SaltCrackerWorker("30s", URL_30S, BOT_TOKEN, ADMIN_ID)
     worker_30.daemon = True 
     worker_30.start()
 
-    # Worker 2: 1 Minute
     worker_1m = SaltCrackerWorker("1m", URL_1M, BOT_TOKEN, ADMIN_ID)
     worker_1m.daemon = True
     worker_1m.start()
