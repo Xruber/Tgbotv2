@@ -21,6 +21,7 @@ from database import (
 )
 from prediction_engine import process_prediction_request, get_bet_unit, get_number_for_outcome, get_v5_logic
 from target_engine import start_target_session, process_target_outcome
+# IMPORT LATEST_RESULTS for the Live Monitor
 from salt_service import start_salt_service, LATEST_RESULTS
 from api_helper import get_game_data
 
@@ -209,8 +210,8 @@ async def live_salt_monitor(query_obj, context, game_type):
             except Exception as e:
                 break 
             
-            # SLOWED DOWN TO PREVENT FLOOD
-            await asyncio.sleep(5)
+            # --- UPDATE INTERVAL SET TO 15 SECONDS ---
+            await asyncio.sleep(15)
             
     except Exception as e:
         logger.error(f"Live Monitor Error: {e}")
