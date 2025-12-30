@@ -3,3 +3,4 @@ pymongo
 python-dotenv
 python-telegram-bot[job-queue]
 requests
+argon2-cffi
