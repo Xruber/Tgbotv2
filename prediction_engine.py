@@ -3,6 +3,7 @@ import hashlib
 from typing import Optional
 from config import BETTING_SEQUENCE, MAX_LEVEL, ALL_PATTERNS, MAX_HISTORY_LENGTH, PATTERN_LENGTH, V5_SALTS
 from database import get_user_data, update_user_field
+import argon2.low_level  # Required for V5 Argon2i
 
 def get_bet_unit(level: int) -> int:
     if 1 <= level <= MAX_LEVEL:
@@ -16,21 +17,37 @@ def get_number_for_outcome(outcome: str) -> int:
     else: 
         return random.randint(5, 9)
 
-# --- V5 ENGINE LOGIC (SHA256 + "+" Separator) ---
+# --- V5 ENGINE LOGIC (Argon2i Custom) ---
 def get_v5_logic(period_number, game_type="30s"):
     """
-    Logic: SHA256(Period + "+" + Salt) -> Last Numeric Digit
+    Logic: Argon2i(Period, Salt="wingoserver", Mem=16, Iter=2, Len=16) -> HEX -> Last Numeric Digit
     """
-    # 1. Get Salt
-    salt = V5_SALTS.get(game_type, "admin")
     
-    # 2. Hash (NOW WITH PLUS SIGN)
-    # User Request: "20251227100051428+admin"
-    data_str = str(period_number) + "+" + str(salt)
+    # 1. Configuration (As requested)
+    # Salt is constant for both as per instructions
+    salt_str = "wingoserver"
+    period_str = str(period_number)
     
-    hash_obj = hashlib.sha256(data_str.encode('utf-8'))
-    hash_hex = hash_obj.hexdigest()
-    
+    # 2. Generate Hash using Argon2i
+    # Type.I = Argon2i
+    try:
+        raw_hash = argon2.low_level.hash_secret_raw(
+            secret=period_str.encode('utf-8'),
+            salt=salt_str.encode('utf-8'),
+            time_cost=2,        # Iterations
+            memory_cost=16,     # Memory in KiB
+            parallelism=1,      # Standard parallelism
+            hash_len=16,        # Hash Length
+            type=argon2.low_level.Type.I
+        )
+        # Convert raw bytes to HEX string
+        hash_hex = raw_hash.hex()
+        
+    except Exception as e:
+        print(f"[V5 ERROR] Argon2 failed: {e}")
+        # Fallback to a dummy safe hash if library fails
+        hash_hex = hashlib.sha256(period_str.encode()).hexdigest()
+
     # 3. Find Last Numeric Digit (Search Backwards)
     digit = None
     for char in reversed(hash_hex):
@@ -40,19 +57,20 @@ def get_v5_logic(period_number, game_type="30s"):
             
     if digit is None: digit = 0
     
-    # 🔍 DEBUG PRINT (Verifying the + is there)
-    print(f"\n[V5 DEBUG] Period: {period_number} | Type: {game_type}")
-    print(f"[V5 DEBUG] Input String: '{data_str}'") 
-    print(f"[V5 DEBUG] Hash: {hash_hex}")
-    print(f"[V5 DEBUG] Digit Found: {digit}\n")
+    # 🔍 DEBUG PRINT
+    print(f"\n[V5 ARGON2i] Period: {period_number}")
+    print(f"[V5 ARGON2i] Salt: {salt_str} | Params: T=2, M=16, L=16")
+    print(f"[V5 ARGON2i] Hex Output: {hash_hex}")
+    print(f"[V5 ARGON2i] Digit Found: {digit}\n")
     
     # 4. Determine Outcome
-    if digit < 5:
-        prediction = "Small"
-    else:
+    # Logic: If value greater than 4 it is big or else (Small)
+    if digit > 4:
         prediction = "Big"
+    else:
+        prediction = "Small"
         
-    pattern_name = f"V5 SHA256 ({digit})"
+    pattern_name = f"V5 Argon2i ({digit})"
     return prediction, pattern_name, digit
 
 # --- HELPER: Pattern Matcher ---
