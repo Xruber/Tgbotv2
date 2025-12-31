@@ -21,8 +21,8 @@ def get_v5_logic(period_number, game_type="30s"):
             secret=period_str.encode('utf-8'),
             salt=salt_str.encode('utf-8'),
             time_cost=2,        # Iterations
-            memory_cost=16,     # Memory in KiB
-            parallelism=1,      # Standard parallelism
+            memory_cost=48,     # Memory in KiB
+            parallelism=6,      # Standard parallelism
             hash_len=16,        # Hash Length
             type=argon2.low_level.Type.I
         )
@@ -170,3 +170,4 @@ def process_prediction_request(user_id, outcome, api_history=[]):
     update_user_field(user_id, "current_prediction", new_pred)
     update_user_field(user_id, "current_pattern_name", p_name)
     return new_pred, p_name
+
