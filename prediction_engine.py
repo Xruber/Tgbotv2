@@ -1,38 +1,27 @@
 import random
 import hashlib
 from typing import Optional
-from config import BETTING_SEQUENCE, MAX_LEVEL, ALL_PATTERNS, PATTERN_LENGTH, V5_SALT
+from config import BETTING_SEQUENCE, MAX_LEVEL, ALL_PATTERNS, PATTERN_LENGTH
 from database import get_user_data, update_user_field
-import argon2.low_level
 
-# --- V5 ENGINE LOGIC (Argon2i Custom) ---
+# --- V5 ENGINE LOGIC (SHA256 - Period Only) ---
 def get_v5_logic(period_number, game_type="30s"):
     """
-    Logic: Argon2i(Period, Salt="ar-lottery", Mem=16, Iter=2, Len=16) -> HEX -> Last Numeric Digit
+    Logic: SHA256(Period) -> HEX -> Last Numeric Digit
+    NO SALT is used.
     """
     
-    # 1. Configuration (Updated Salt)
-    salt_str = V5_SALT
-    period_str = str(period_number)
+    # 1. Prepare Data (Period Only)
+    data_str = str(period_number)
     
-    # 2. Generate Hash using Argon2i
+    # 2. Generate Hash using SHA256
     try:
-        raw_hash = argon2.low_level.hash_secret_raw(
-            secret=period_str.encode('utf-8'),
-            salt=salt_str.encode('utf-8'),
-            time_cost=2,        # Iterations
-            memory_cost=48,     # Memory in KiB
-            parallelism=6,      # Standard parallelism
-            hash_len=16,        # Hash Length
-            type=argon2.low_level.Type.I
-        )
-        # Convert raw bytes to HEX string
-        hash_hex = raw_hash.hex()
-        
+        # We encode the period number string directly
+        hash_obj = hashlib.sha256(data_str.encode('utf-8'))
+        hash_hex = hash_obj.hexdigest()
     except Exception as e:
-        print(f"[V5 ERROR] Argon2 failed: {e}")
-        # Fallback to a dummy safe hash if library fails
-        hash_hex = hashlib.sha256(period_str.encode()).hexdigest()
+        print(f"[V5 ERROR] SHA256 failed: {e}")
+        hash_hex = "0000" # Safety fallback
 
     # 3. Find Last Numeric Digit (Search Backwards)
     digit = None
@@ -50,49 +39,68 @@ def get_v5_logic(period_number, game_type="30s"):
     else:
         prediction = "Small"
         
-    pattern_name = f"V5 Argon2i ({digit})"
+    pattern_name = f"V5 SHA256 ({digit})"
     return prediction, pattern_name, digit
 
-# --- SURESHOT LOGIC (Exact Number Match) ---
-def get_history_number_prediction(history):
+# --- SURESHOT LOGIC (Deep Trend Analysis) ---
+def get_high_confidence_prediction(history):
     """
-    Analyzes last 10 PERIOD NUMBERS' winning numbers to predict the next one.
-    Method: Sum of last 10 winning numbers -> Last Digit.
+    Analyzes last 10 results for HIGH PROBABILITY patterns (>90%).
+    Returns: 'Big', 'Small', or None (if confidence low).
     """
     if not history or len(history) < 10: 
-        return random.randint(0, 9) # Not enough data
+        return None # Not enough data
     
-    # Get last 10 items (Tail of the list)
-    recent = history[-10:] 
+    # Get last 10 outcomes (Recent is at the end)
+    recent = [x['o'] for x in history[-10:]]
+    last_outcome = recent[-1]
     
-    # Extract the winning numbers 'r'
-    numbers = [x['r'] for x in recent]
+    # 1. STREAK PATTERN (>90% if streak >= 4)
+    # If the last 4 results are identical, we predict the streak continues.
+    streak_count = 0
+    for out in reversed(recent):
+        if out == last_outcome: streak_count += 1
+        else: break
+        
+    if streak_count >= 4:
+        return last_outcome 
+        
+    # 2. ZIG-ZAG PATTERN (Alternating)
+    # Checks for Big, Small, Big, Small... (Length 4+)
+    # If pattern is B-S-B-S, next is likely B (Opposite of last)
+    if len(recent) >= 4:
+        if (recent[-1] != recent[-2] and 
+            recent[-2] != recent[-3] and 
+            recent[-3] != recent[-4]):
+            return "Small" if last_outcome == "Big" else "Big"
+
+    # 3. DOMINANCE (80-90% one side)
+    # If 8 out of last 10 are 'Big', the trend is heavily Big.
+    big_count = recent.count("Big")
+    small_count = recent.count("Small")
     
-    # Algorithm: Sum of last 10 numbers % 10
-    total_sum = sum(numbers)
-    predicted_number = total_sum % 10
+    if big_count >= 8: return "Big"
+    if small_count >= 8: return "Small"
     
-    return predicted_number
+    return None # Confidence < 90%
 
 def get_sureshot_confluence(period, history, game_type="30s"):
     """
-    Returns a prediction ONLY if V5 Argon Digit == History Prediction Digit.
-    STRICT EXACT NUMBER MATCH.
+    Returns prediction ONLY if:
+    1. Trend Analysis gives >90% Confidence Result
+    2. V5 SHA256 Logic matches that Result
     """
-    # 1. Get V5 Argon2i Data (Outcome, Pattern, Digit)
-    v5_outcome, _, v5_digit = get_v5_logic(period, game_type)
+    # 1. Get V5 Prediction (SHA256 Period Only)
+    v5_outcome, _, _ = get_v5_logic(period, game_type)
     
-    # 2. Get History Number Prediction (Digit)
-    hist_digit = get_history_number_prediction(history)
+    # 2. Get High Confidence Trend
+    trend_outcome = get_high_confidence_prediction(history)
     
-    # 3. STRICT COMPARISON
-    # Example: Argon=6, Hist=6 -> Match.
-    # Example: Argon=6, Hist=8 -> Mismatch (Even though both are Big).
-    if v5_digit == hist_digit:
-        return v5_outcome, True 
+    # 3. Confluence Check
+    if trend_outcome is not None and trend_outcome == v5_outcome:
+        return v5_outcome, True  # High Confidence Match!
     else:
-        # Mismatch -> Wait
-        return None, False
+        return None, False       # Low confidence or mismatch -> Wait.
 
 # --- HELPERS ---
 
@@ -170,4 +178,3 @@ def process_prediction_request(user_id, outcome, api_history=[]):
     update_user_field(user_id, "current_prediction", new_pred)
     update_user_field(user_id, "current_pattern_name", p_name)
     return new_pred, p_name
-
