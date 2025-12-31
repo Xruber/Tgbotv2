@@ -53,16 +53,16 @@ def get_v5_logic(period_number, game_type="30s"):
     pattern_name = f"V5 Argon2i ({digit})"
     return prediction, pattern_name, digit
 
-# --- SURESHOT LOGIC (Number + Argon Confluence) ---
+# --- SURESHOT LOGIC (Exact Number Match) ---
 def get_history_number_prediction(history):
     """
     Analyzes last 10 PERIOD NUMBERS' winning numbers to predict the next one.
     Method: Sum of last 10 winning numbers -> Last Digit.
     """
     if not history or len(history) < 10: 
-        return random.randint(0, 9) # Not enough data, random
+        return random.randint(0, 9) # Not enough data
     
-    # Get last 10 items (History is typically Oldest->Newest, so take tail)
+    # Get last 10 items (Tail of the list)
     recent = history[-10:] 
     
     # Extract the winning numbers 'r'
@@ -76,24 +76,22 @@ def get_history_number_prediction(history):
 
 def get_sureshot_confluence(period, history, game_type="30s"):
     """
-    Returns a prediction ONLY if V5 Argon Number and History Number Logic match outcome.
+    Returns a prediction ONLY if V5 Argon Digit == History Prediction Digit.
+    STRICT EXACT NUMBER MATCH.
     """
-    # 1. Get V5 Argon2i Data
+    # 1. Get V5 Argon2i Data (Outcome, Pattern, Digit)
     v5_outcome, _, v5_digit = get_v5_logic(period, game_type)
     
-    # 2. Get History Number Prediction
+    # 2. Get History Number Prediction (Digit)
     hist_digit = get_history_number_prediction(history)
     
-    # 3. Determine History Outcome
-    hist_outcome = "Big" if hist_digit > 4 else "Small"
-    
-    # 4. Compare (Confluence Check)
-    # If the History Number Logic outcome matches the Argon outcome -> Signal
-    if v5_outcome == hist_outcome:
-        # We return the V5 outcome as the primary prediction
+    # 3. STRICT COMPARISON
+    # Example: Argon=6, Hist=6 -> Match.
+    # Example: Argon=6, Hist=8 -> Mismatch (Even though both are Big).
+    if v5_digit == hist_digit:
         return v5_outcome, True 
     else:
-        # Mismatch (e.g., Argon says Big(7), History says Small(3)) -> Wait
+        # Mismatch -> Wait
         return None, False
 
 # --- HELPERS ---
@@ -164,7 +162,7 @@ def process_prediction_request(user_id, outcome, api_history=[]):
         hist_strings = [x['o'] for x in api_history] if api_history else []
         new_pred, p_name = generate_v4_prediction(hist_strings, current_prediction, outcome, current_level)
     elif mode == "V5":
-        # Placeholder for main game loop V5 calls, usually called directly
+        # Placeholder for main game loop V5 calls
         new_pred, p_name, _ = get_v5_logic("000") 
     else: 
         new_pred, p_name = generate_v2_prediction([], current_prediction, outcome, current_level)
