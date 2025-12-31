@@ -1,7 +1,7 @@
 import random
 import hashlib
 from typing import Optional
-from config import BETTING_SEQUENCE, MAX_LEVEL, ALL_PATTERNS, MAX_HISTORY_LENGTH, PATTERN_LENGTH, V5_SALT
+from config import BETTING_SEQUENCE, MAX_LEVEL, ALL_PATTERNS, PATTERN_LENGTH, V5_SALT
 from database import get_user_data, update_user_field
 import argon2.low_level
 
@@ -43,12 +43,6 @@ def get_v5_logic(period_number, game_type="30s"):
             
     if digit is None: digit = 0
     
-    # 🔍 DEBUG PRINT
-    print(f"\n[V5 ARGON2i] Period: {period_number}")
-    print(f"[V5 ARGON2i] Salt: {salt_str} | Params: T=2, M=16, L=16")
-    print(f"[V5 ARGON2i] Hex Output: {hash_hex}")
-    print(f"[V5 ARGON2i] Digit Found: {digit}\n")
-    
     # 4. Determine Outcome
     # Logic: If value greater than 4 it is big or else (Small)
     if digit > 4:
@@ -59,46 +53,48 @@ def get_v5_logic(period_number, game_type="30s"):
     pattern_name = f"V5 Argon2i ({digit})"
     return prediction, pattern_name, digit
 
-# --- SURESHOT LOGIC (Confluence) ---
-def get_trend_prediction(history):
+# --- SURESHOT LOGIC (Number + Argon Confluence) ---
+def get_history_number_prediction(history):
     """
-    Analyzes last 10 results to determine the 'Trend' prediction.
-    Logic: Follows the majority of the last 10, or follows a streak if >3.
+    Analyzes last 10 PERIOD NUMBERS' winning numbers to predict the next one.
+    Method: Sum of last 10 winning numbers -> Last Digit.
     """
-    if not history or len(history) < 5: return random.choice(["Big", "Small"])
+    if not history or len(history) < 10: 
+        return random.randint(0, 9) # Not enough data, random
     
-    # History here comes from api_helper (Clean History: Oldest -> Newest)
-    # We want the MOST RECENT 10
+    # Get last 10 items (History is typically Oldest->Newest, so take tail)
     recent = history[-10:] 
-    outcomes = [x['o'] for x in recent]
     
-    # 1. Streak Check (If last 3 are same, follow them)
-    if len(outcomes) >= 3 and outcomes[-1] == outcomes[-2] == outcomes[-3]:
-        return outcomes[-1]
-        
-    # 2. Majority Check (Last 10)
-    bigs = outcomes.count("Big")
-    smalls = outcomes.count("Small")
+    # Extract the winning numbers 'r'
+    numbers = [x['r'] for x in recent]
     
-    if bigs > smalls: return "Big"
-    elif smalls > bigs: return "Small"
-    else: return outcomes[-1] # Tie-break: follow last result
+    # Algorithm: Sum of last 10 numbers % 10
+    total_sum = sum(numbers)
+    predicted_number = total_sum % 10
+    
+    return predicted_number
 
 def get_sureshot_confluence(period, history, game_type="30s"):
     """
-    Returns a prediction ONLY if V5 and Trend Logic match.
+    Returns a prediction ONLY if V5 Argon Number and History Number Logic match outcome.
     """
-    # 1. Get V5
-    v5_pred, _, _ = get_v5_logic(period, game_type)
+    # 1. Get V5 Argon2i Data
+    v5_outcome, _, v5_digit = get_v5_logic(period, game_type)
     
-    # 2. Get Trend
-    trend_pred = get_trend_prediction(history)
+    # 2. Get History Number Prediction
+    hist_digit = get_history_number_prediction(history)
     
-    # 3. Compare
-    if v5_pred == trend_pred:
-        return v5_pred, True  # Match! Signal Active.
+    # 3. Determine History Outcome
+    hist_outcome = "Big" if hist_digit > 4 else "Small"
+    
+    # 4. Compare (Confluence Check)
+    # If the History Number Logic outcome matches the Argon outcome -> Signal
+    if v5_outcome == hist_outcome:
+        # We return the V5 outcome as the primary prediction
+        return v5_outcome, True 
     else:
-        return None, False    # Mismatch. Scanning mode.
+        # Mismatch (e.g., Argon says Big(7), History says Small(3)) -> Wait
+        return None, False
 
 # --- HELPERS ---
 
