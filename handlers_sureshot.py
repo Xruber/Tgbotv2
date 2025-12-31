@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, error
 from telegram.ext import ContextTypes, ConversationHandler
 from target_engine import start_sureshot_session, process_sureshot_loop
 from config import SURESHOT_MENU, SURESHOT_LOOP
@@ -13,7 +13,7 @@ async def sureshot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━\n"
         "🔥 **Goal:** 100 ➡️ 1000 (5 Steps)\n"
         "🧱 **Strategy:** Compounding (All-in)\n"
-        "🔫 **Mode:** Sniper (Bets ONLY when V5 + Trend match)\n\n"
+        "🔫 **Mode:** Sniper (V5 + Trend)\n\n"
         "⚠️ _High Risk. If V5 and Trend disagree, we SKIP._"
     )
     await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -35,7 +35,12 @@ async def sureshot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def sureshot_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Refreshes the scanner (Called when user clicks 'Scan Again')."""
     q = update.callback_query
-    await q.answer("Scanning...")
+    # We don't await q.answer() here immediately to avoid 'waiting' icon if it's fast
+    # But it's good practice to answer.
+    try:
+        await q.answer("Scanning...")
+    except:
+        pass
     
     # Process with NO outcome (Just checking for new signal)
     session, status = process_sureshot_loop(q.from_user.id, outcome=None)
@@ -102,4 +107,11 @@ async def show_sureshot_ui(update_obj, session):
             [InlineKeyboardButton("⏭ Skip", callback_data="ss_refresh")]
         ])
 
-    await update_obj.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+    # FIX: Catch "Message is not modified" error
+    try:
+        await update_obj.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+    except error.BadRequest as e:
+        if "Message is not modified" in str(e):
+            pass # Ignore if content is same
+        else:
+            raise e # Raise other errors
