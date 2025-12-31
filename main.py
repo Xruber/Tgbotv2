@@ -20,13 +20,13 @@ def draw_bar(percent, length=10, style="blocks"):
     """Generates a high-end text progress bar with emojis."""
     percent = max(0.0, min(1.0, percent))
     filled_len = int(length * percent)
-    if style == "blocks": bar = "" * filled_len + "" * (length - filled_len)
+    if style == "blocks": bar = "█" * filled_len + "░" * (length - filled_len)
     elif style == "risk":
-        if percent < 0.4: c = ""
-        elif percent < 0.7: c = ""
-        else: c = ""
-        bar = c * filled_len + "" * (length - filled_len)
-    else: bar = "" * filled_len + " " * (length - filled_len)
+        if percent < 0.4: c = "🟢"
+        elif percent < 0.7: c = "🟡"
+        else: c = "🔴"
+        bar = c * filled_len + "⚪" * (length - filled_len)
+    else: bar = "█" * filled_len + " " * (length - filled_len)
     return f"[{bar}] {int(percent * 100)}%"
 
 async def start_command(update: Update, context):
@@ -59,30 +59,30 @@ async def start_command(update: Update, context):
         rem = max(0, expiry - now)
         health_pct = min(1.0, rem / total_dur)
         health_bar = draw_bar(health_pct, length=6, style="blocks")
-        status_txt = f" **Plan:** Active\n{health_bar}"
-        main_btn = [InlineKeyboardButton(" START PREDICTION", callback_data="select_game_type")]
+        status_txt = f"💎 **Plan:** Active\n{health_bar}"
+        main_btn = [InlineKeyboardButton("🚀 START PREDICTION", callback_data="select_game_type")]
     else:
-        status_txt = " **Plan:** Expired / Free"
-        main_btn = [InlineKeyboardButton(" UNLOCK VIP ACCESS", callback_data="start_prediction_flow")]
+        status_txt = "⚠️ **Plan:** Expired / Free"
+        main_btn = [InlineKeyboardButton("🔓 UNLOCK VIP ACCESS", callback_data="start_prediction_flow")]
 
     buttons = [
-        [InlineKeyboardButton(" Community", url="https://t.me/your_community_link")],
-        [InlineKeyboardButton(" Shop", callback_data="shop_main"), InlineKeyboardButton(" Profile", callback_data="my_stats")]
+        [InlineKeyboardButton("💬 Community", url="https://t.me/your_community_link")],
+        [InlineKeyboardButton("🛒 Shop", callback_data="shop_main"), InlineKeyboardButton("👤 Profile", callback_data="my_stats")]
     ]
     buttons.insert(1, main_btn)
     
     msg = (
-        f" **WINGO AI V5 PRO**\n"
-        f"\n"
-        f" Hello, **{update.effective_user.first_name}**!\n"
+        f"🤖 **WINGO AI V5 PRO**\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"👋 Hello, **{update.effective_user.first_name}**!\n"
         f"{status_txt}\n"
-        f" **Daily Luck:**\n{luck_bar}\n"
-        f"\n"
-        f" **Features:**\n"
-        f" Live API (30s & 1m)\n"
-        f" V5 Argon2i Engine\n"
-        f" SureShot Ladder\n\n"
-        f" **Main Menu:**"
+        f"🍀 **Daily Luck:**\n{luck_bar}\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"⚡ **Features:**\n"
+        f"🔹 Live API (30s & 1m)\n"
+        f"🔹 V5 Argon2i Engine\n"
+        f"🔹 SureShot Ladder\n\n"
+        f"👇 **Main Menu:**"
     )
     
     if update.callback_query:
