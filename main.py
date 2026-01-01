@@ -30,65 +30,75 @@ def draw_bar(percent, length=10, style="blocks"):
     return f"[{bar}] {int(percent * 100)}%"
 
 async def start_command(update: Update, context):
-    user_id = update.effective_user.id
-    user_data = get_user_data(user_id) 
-    
-    # Referral Logic
-    if context.args and not user_data.get("referred_by"):
-        try:
-            referrer_id = int(context.args[0])
-            if referrer_id != user_id:
-                update_user_field(user_id, "referred_by", referrer_id)
-        except: pass
+    try:
+        user_id = update.effective_user.id
+        user_data = get_user_data(user_id) 
+        
+        # Referral Logic
+        if context.args and not user_data.get("referred_by"):
+            try:
+                referrer_id = int(context.args[0])
+                if referrer_id != user_id:
+                    update_user_field(user_id, "referred_by", referrer_id)
+            except: pass
 
-    active = is_subscription_active(user_data)
-    
-    #   DAILY LUCK METER
-    today = datetime.datetime.now().day
-    random.seed(user_id + today) # Fixed luck for the day
-    luck_percent = random.uniform(0.45, 0.98)
-    luck_bar = draw_bar(luck_percent, length=8, style="risk")
-    random.seed()
-    
-    # SUBSCRIPTION HEALTH BAR
-    if active:
-        expiry = user_data.get("expiry_timestamp", 0)
-        now = datetime.datetime.now().timestamp()
-        # Assume 30 days max for bar visual
-        total_dur = 30 * 24 * 3600
-        rem = max(0, expiry - now)
-        health_pct = min(1.0, rem / total_dur)
-        health_bar = draw_bar(health_pct, length=6, style="blocks")
-        status_txt = f"💎 **Plan:** Active\n{health_bar}"
-        main_btn = [InlineKeyboardButton("🚀 START PREDICTION", callback_data="select_game_type")]
-    else:
-        status_txt = "⚠️ **Plan:** Expired / Free"
-        main_btn = [InlineKeyboardButton("🔓 UNLOCK VIP ACCESS", callback_data="start_prediction_flow")]
+        active = is_subscription_active(user_data)
+        
+        #   DAILY LUCK METER
+        today = datetime.datetime.now().day
+        random.seed(user_id + today) # Fixed luck for the day
+        luck_percent = random.uniform(0.45, 0.98)
+        luck_bar = draw_bar(luck_percent, length=8, style="risk")
+        random.seed()
+        
+        # SUBSCRIPTION HEALTH BAR
+        if active:
+            expiry = user_data.get("expiry_timestamp", 0)
+            now = datetime.datetime.now().timestamp()
+            # Assume 30 days max for bar visual
+            total_dur = 30 * 24 * 3600
+            rem = max(0, expiry - now)
+            health_pct = min(1.0, rem / total_dur)
+            health_bar = draw_bar(health_pct, length=6, style="blocks")
+            status_txt = f"💎 **Plan:** Active\n{health_bar}"
+            main_btn = [InlineKeyboardButton("🚀 START PREDICTION", callback_data="select_game_type")]
+        else:
+            status_txt = "⚠️ **Plan:** Expired / Free"
+            main_btn = [InlineKeyboardButton("🔓 UNLOCK VIP ACCESS", callback_data="start_prediction_flow")]
 
-    buttons = [
-        [InlineKeyboardButton("💬 Community", url="https://t.me/your_community_link")],
-        [InlineKeyboardButton("🛒 Shop", callback_data="shop_main"), InlineKeyboardButton("👤 Profile", callback_data="my_stats")]
-    ]
-    buttons.insert(1, main_btn)
+        buttons = [
+            [InlineKeyboardButton("💬 Community", url="https://t.me/your_community_link")],
+            [InlineKeyboardButton("🛒 Shop", callback_data="shop_main"), InlineKeyboardButton("👤 Profile", callback_data="my_stats")]
+        ]
+        buttons.insert(1, main_btn)
+        
+        # FIX: Escape username to prevent Markdown errors
+        raw_name = update.effective_user.first_name
+        safe_name = raw_name.replace("*", "").replace("_", "").replace("`", "").replace("[", "")
+        
+        msg = (
+            f"🤖 **WINGO AI V5 PRO**\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"👋 Hello, **{safe_name}**!\n"
+            f"{status_txt}\n"
+            f"🍀 **Daily Luck:**\n{luck_bar}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"⚡ **Features:**\n"
+            f"🔹 Live API (30s & 1m)\n"
+            f"🔹 V5 Argon2i Engine\n"
+            f"🔹 SureShot Ladder\n\n"
+            f"👇 **Main Menu:**"
+        )
+        
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+        else:
+            await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
     
-    msg = (
-        f"🤖 **WINGO AI V5 PRO**\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"👋 Hello, **{update.effective_user.first_name}**!\n"
-        f"{status_txt}\n"
-        f"🍀 **Daily Luck:**\n{luck_bar}\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"⚡ **Features:**\n"
-        f"🔹 Live API (30s & 1m)\n"
-        f"🔹 V5 Argon2i Engine\n"
-        f"🔹 SureShot Ladder\n\n"
-        f"👇 **Main Menu:**"
-    )
-    
-    if update.callback_query:
-        await update.callback_query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
-    else:
-        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+    except Exception as e:
+        print(f"ERROR in start_command: {e}") # Log error to console for debugging
+        await update.message.reply_text("⚠️ **System Error.** Please try again later.")
+        
     return ConversationHandler.END
 
 def main():
