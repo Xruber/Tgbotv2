@@ -65,10 +65,25 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"━━━━━━━━━━━━━━\n"
         f"1. Scan QR -> Pay\n2. Click 'Paid'\n3. Send UTR"
     )
+    
     try: await q.message.delete()
     except: pass
-    await context.bot.send_photo(uid, PAYMENT_IMAGE_URL, caption=caption, 
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ I Have Paid", callback_data="sent")]]))
+    
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ I Have Paid", callback_data="sent")]])
+
+    # --- ROBUST SENDING LOGIC ---
+    try:
+        # Try sending the image invoice
+        await context.bot.send_photo(uid, PAYMENT_IMAGE_URL, caption=caption, reply_markup=kb)
+    except Exception as e:
+        # Fallback: If image fails (expired link), send Text-Only Invoice with UPI
+        fallback_msg = (
+            f"{caption}\n\n"
+            f"⚠️ **Image Error?**\n"
+            f"🆔 **PAY DIRECTLY UPI:** `akshayajith@fam`" 
+        )
+        await context.bot.send_message(uid, text=fallback_msg, reply_markup=kb)
+
     return WAITING_FOR_PAYMENT_PROOF
 
 async def confirm_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
