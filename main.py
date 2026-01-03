@@ -3,19 +3,19 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ConversationHandler
 )
-from config import BOT_TOKEN, LANGUAGE_SELECT, MAIN_MENU, PREDICTION_LOOP, SHOP_MENU, WAITING_UTR, REDEEM_PROCESS
+from config import BOT_TOKEN, LANGUAGE_SELECT, MAIN_MENU, PREDICTION_LOOP, SHOP_MENU, WAITING_UTR, REDEEM_PROCESS, TARGET_MENU, TARGET_LOOP
 from handlers import (
     start_command, set_language, show_main_menu, start_prediction, 
-    prediction_logic, handle_result, shop_menu, 
+    prediction_logic, handle_result, shop_menu, shop_callback,
     profile_command, redeem_entry, redeem_process, 
     admin_panel, admin_callback, ban_command, 
-    invite_command, packs_command, target_command, language_command, cancel
+    invite_command, packs_command, target_command, language_command, cancel,
+    target_menu_entry, start_target_game, target_loop_handler, handle_utr
 )
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # --- MAIN CONVERSATION ---
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start_command),
@@ -28,20 +28,36 @@ def main():
             MAIN_MENU: [
                 CallbackQueryHandler(start_prediction, pattern="^nav_pred$"),
                 CallbackQueryHandler(shop_menu, pattern="^nav_shop$"),
+                CallbackQueryHandler(target_menu_entry, pattern="^nav_target_menu$"),
                 CallbackQueryHandler(profile_command, pattern="^nav_profile$"),
                 CallbackQueryHandler(redeem_entry, pattern="^nav_redeem$"),
-                CallbackQueryHandler(show_main_menu, pattern="^nav_home$") # Universal Back
+                CallbackQueryHandler(show_main_menu, pattern="^nav_home$") 
             ],
             
             PREDICTION_LOOP: [
                 CallbackQueryHandler(prediction_logic, pattern="^game_"), 
                 CallbackQueryHandler(handle_result, pattern="^res_"),
-                CallbackQueryHandler(show_main_menu, pattern="^nav_home$") # Fixes Stuck Logic
+                CallbackQueryHandler(show_main_menu, pattern="^nav_home$") 
+            ],
+            
+            TARGET_MENU: [
+                CallbackQueryHandler(start_target_game, pattern="^tgt_start_"),
+                CallbackQueryHandler(show_main_menu, pattern="^nav_home$")
+            ],
+            
+            TARGET_LOOP: [
+                CallbackQueryHandler(target_loop_handler, pattern="^tgt_"), # Win/Loss
+                CallbackQueryHandler(target_loop_handler, pattern="^nav_home$") # Back
             ],
             
             SHOP_MENU: [
-                CallbackQueryHandler(show_main_menu, pattern="^nav_home$"),
-                # Add buy logic handlers here
+                CallbackQueryHandler(shop_callback, pattern="^buy_"),
+                CallbackQueryHandler(shop_callback, pattern="^shop_"),
+                CallbackQueryHandler(shop_callback, pattern="^nav_"),
+            ],
+            
+            WAITING_UTR: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_utr)
             ],
             
             REDEEM_PROCESS: [
@@ -53,7 +69,7 @@ def main():
     
     app.add_handler(conv)
     
-    # --- COMMANDS ---
+    # Global Commands
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("invite", invite_command))
