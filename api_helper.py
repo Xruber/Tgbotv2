@@ -1,8 +1,10 @@
 import requests
 import time
+import logging
 
+# Configuration
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K)",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
     "Referer": "https://www.92lottery.com/"
 }
 
@@ -12,39 +14,52 @@ URLS = {
 }
 
 def get_game_data(game_type="30s"):
-    """Fetch current period and history."""
+    """
+    Fetches the API data.
+    Returns: (Current_Period_String, History_List)
+    """
     url = URLS.get(game_type, URLS["30s"])
+    timestamp = int(time.time() * 1000)
+    
     try:
-        ts = int(time.time() * 1000)
-        resp = requests.get(f"{url}?ts={ts}&page=1&size=10", headers=HEADERS, timeout=5).json()
+        response = requests.get(f"{url}?ts={timestamp}&page=1&size=10", headers=HEADERS, timeout=5)
+        data = response.json()
         
-        raw_list = resp.get('data', {}).get('list', [])
-        history = []
+        raw_list = data.get('data', {}).get('list', [])
+        clean_history = []
+        
         for item in raw_list:
-            p = str(item['issueNumber'])
-            res = int(item['number'])
-            out = "Big" if res >= 5 else "Small"
-            history.append({'p': p, 'r': res, 'o': out})
+            period = str(item['issueNumber'])
+            number = int(item['number'])
+            outcome = "Big" if number >= 5 else "Small"
+            clean_history.append({'p': period, 'r': number, 'o': outcome})
             
-        history.reverse() # Oldest first
+        if not clean_history:
+            return None, []
+            
+        # Sort: Oldest -> Newest (History[-1] is the most recent result)
+        clean_history.reverse()
         
-        if not history: return None, []
+        # Calculate Current Period (Last Result + 1)
+        last_period = int(clean_history[-1]['p'])
+        current_period = str(last_period + 1)
         
-        # Calculate Next Period (Current)
-        last_p = int(history[-1]['p'])
-        current_p = str(last_p + 1)
-        
-        return current_p, history
+        return current_period, clean_history
+
     except Exception as e:
         print(f"API Error: {e}")
         return None, []
 
-def check_result_exists(game_type, period_to_check):
+def check_result_exists(game_type, target_period):
     """
-    CRITICAL FIX: Checks if the result for 'period_to_check' is actually published.
+    Checks if the result for a specific period has been published.
+    Returns: (True/False, Outcome)
     """
-    _, history = get_game_data(game_type)
+    current, history = get_game_data(game_type)
+    if not history: return False, None
+    
     for item in history:
-        if str(item['p']) == str(period_to_check):
-            return True, item['o'] # Result found, return Outcome
+        if str(item['p']) == str(target_period):
+            return True, item['o']
+            
     return False, None
