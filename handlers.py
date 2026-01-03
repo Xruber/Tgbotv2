@@ -77,7 +77,7 @@ async def show_main_menu(update_obj, user_id):
     msg = f"{status}\n\n{txt}"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(get_text(user_id, "btn_pred"), callback_data="nav_pred"),
-         InlineKeyboardButton(get_text(user_id, "btn_target"), callback_data="nav_target_menu")], # Target Button
+         InlineKeyboardButton(get_text(user_id, "btn_target"), callback_data="nav_target_menu")], 
         [InlineKeyboardButton(get_text(user_id, "btn_shop"), callback_data="nav_shop"),
          InlineKeyboardButton(get_text(user_id, "btn_profile"), callback_data="nav_profile")],
         [InlineKeyboardButton(get_text(user_id, "btn_redeem"), callback_data="nav_redeem"),
@@ -90,7 +90,67 @@ async def show_main_menu(update_obj, user_id):
         await update_obj.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
     return MAIN_MENU
 
-# --- PREDICTION SYSTEM (Fixed Number Shot) ---
+# --- PROFILE & COMMANDS ---
+@check_status
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows user stats."""
+    if update.callback_query: await update.callback_query.answer()
+    uid = update.effective_user.id
+    ud = get_user_data(uid)
+    
+    wins = ud.get('total_wins', 0)
+    losses = ud.get('total_losses', 0)
+    total = wins + losses
+    rate = int((wins/total)*100) if total > 0 else 0
+    
+    msg = (
+        f"👤 **USER PROFILE**\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"🆔 ID: `{uid}`\n"
+        f"🌍 Language: {ud.get('language')}\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"🏆 Wins: **{wins}**\n"
+        f"📉 Losses: **{losses}**\n"
+        f"📊 Win Rate: **{rate}%**"
+    )
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="nav_home")]]), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    return MAIN_MENU
+
+@check_status
+async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    link = f"https://t.me/{context.bot.username}?start={update.effective_user.id}"
+    await update.message.reply_text(f"🔗 **Invite Link:**\n`{link}`\n\nShare to earn rewards!")
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Reset language so prompt appears again
+    update_user_field(update.effective_user.id, "language", None)
+    return await start_command(update, context)
+
+# --- REDEEM SYSTEM ---
+@check_status
+async def redeem_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query: await update.callback_query.answer()
+    await (update.callback_query.message if update.callback_query else update.message).reply_text(
+        "🎁 **REDEEM CODE**\n\nEnter your Gift Code below:\nType /cancel to stop."
+    )
+    return REDEEM_PROCESS
+
+async def redeem_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
+    success, msg = redeem_code(update.effective_user.id, code)
+    if success:
+        await update.message.reply_text(f"✅ **Success!** {msg} Unlocked.")
+        await show_main_menu(update, update.effective_user.id)
+        return MAIN_MENU
+    else:
+        await update.message.reply_text(f"❌ {msg}. Try again or /cancel.")
+        return REDEEM_PROCESS
+
+# --- PREDICTION ENGINE ---
 @check_status
 async def start_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -126,7 +186,6 @@ async def prediction_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = get_user_data(uid)
     shot_txt = ""
     if ud.get("has_number_shot"):
-        # Generate exact number based on prediction
         if pred == "Big": num = random.choice([5,6,7,8,9])
         else: num = random.choice([0,1,2,3,4])
         shot_txt = f"\n🎯 **Shot:** `{num}`"
@@ -167,22 +226,20 @@ async def handle_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await prediction_logic(update, context)
     return PREDICTION_LOOP
 
-# --- TARGET SYSTEM (The 6-Level Logic) ---
+# --- TARGET SYSTEM (6-Levels) ---
 @check_status
 async def target_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    # Check if active session exists
     ud = get_user_data(q.from_user.id)
     if ud.get("target_session"):
-        return await target_loop(update, context) # Go straight to loop
+        return await target_loop_handler(update, context) # Re-enter loop
         
-    # Show Setup Menu
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🕒 30s", callback_data="tgt_start_30s"), InlineKeyboardButton("🕐 1m", callback_data="tgt_start_1m")],
         [InlineKeyboardButton("🔙 Back", callback_data="nav_home")]
     ])
-    await q.edit_message_text("🎯 **TARGET SESSION**\nSelect Game Type to Start:", reply_markup=kb)
+    await q.edit_message_text("🎯 **TARGET SESSION**\nSelect Game:", reply_markup=kb)
     return TARGET_MENU
 
 @check_status
@@ -191,10 +248,9 @@ async def start_target_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     ud = get_user_data(uid)
     
-    # Check Ownership
-    access_key = ud.get("target_access") # e.g., 'target_2k'
+    access_key = ud.get("target_access") 
     if not access_key:
-        await q.answer("🚫 You need to buy a Target Pack!", show_alert=True)
+        await q.answer("🚫 Buy a Target Pack first!", show_alert=True)
         return TARGET_MENU
         
     gtype = "30s" if "30s" in q.data else "1m"
@@ -208,7 +264,6 @@ async def start_target_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return TARGET_LOOP
 
 async def display_target_ui(update_obj, sess):
-    # Calculate Bet
     lvl = sess["current_level_index"] + 1
     try: bet = sess["sequence"][lvl-1]
     except: bet = sess["sequence"][-1]
@@ -238,6 +293,16 @@ async def target_loop_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await show_main_menu(update, q.from_user.id)
         return MAIN_MENU
 
+    # If re-entering loop without clicking win/loss (e.g. from menu)
+    if "tgt_" not in q.data:
+         # Use stored session to display
+         ud = get_user_data(q.from_user.id)
+         if ud.get("target_session"):
+             await display_target_ui(q, ud.get("target_session"))
+             return TARGET_LOOP
+         else:
+             return await show_main_menu(update, q.from_user.id)
+
     sess, status = process_target_outcome(q.from_user.id, q.data.replace("tgt_", ""))
     
     if status == "TargetReached":
@@ -250,24 +315,17 @@ async def target_loop_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     await display_target_ui(q, sess)
     return TARGET_LOOP
 
-# --- SHOP & REDEEM ---
+# --- SHOP & ADMIN ---
 @check_status
 async def shop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     
-    # Show Plans + Number Shot + Target Packs
     kb = []
-    # Normal Plans
     for k, v in PREDICTION_PLANS.items():
         kb.append([InlineKeyboardButton(f"{v['name']} - {v['price']}", callback_data=f"buy_{k}")])
-    
-    # Target Packs (Fixed Button)
     kb.append([InlineKeyboardButton("🎯 Target Packs", callback_data="shop_targets")])
-    
-    # Number Shot (Fixed Button)
     kb.append([InlineKeyboardButton(f"🎲 Number Shot ({NUMBER_SHOT_PRICE})", callback_data=f"buy_{NUMBER_SHOT_KEY}")])
-    
     kb.append([InlineKeyboardButton("🔙 Back", callback_data="nav_home")])
     
     await q.edit_message_text("🛒 **VIP STORE**\nSelect an Item:", reply_markup=InlineKeyboardMarkup(kb))
@@ -283,15 +341,17 @@ async def shop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
         
     if data == "shop_targets":
-        # Show Target Packs
         kb = []
         for k, v in TARGET_PACKS.items():
             kb.append([InlineKeyboardButton(f"{v['name']} - {v['price']}", callback_data=f"buy_{k}")])
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="nav_shop")])
-        await q.edit_message_text("🎯 **TARGET PACKS**\nSplits 1k into 6 Steps.", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("🎯 **TARGET PACKS**", reply_markup=InlineKeyboardMarkup(kb))
         return SHOP_MENU
+    
+    if data == "nav_shop":
+        return await shop_menu(update, context)
         
-    # Buying Logic (Simplified for brevity - assumes UTR flow starts here)
+    # Buy Process
     item_key = data.replace("buy_", "")
     msg = f"💳 **INVOICE**\nItem: {item_key}\n\nPay via UPI and send UTR."
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="nav_shop")]])
@@ -301,7 +361,6 @@ async def shop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @check_status
 async def handle_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Admin Approval Logic
     utr = update.message.text
     uid = update.effective_user.id
     item = context.user_data.get("buying")
@@ -310,12 +369,12 @@ async def handle_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✅ Yes", callback_data=f"adm_ok_{uid}_{item}"),
          InlineKeyboardButton("❌ No", callback_data=f"adm_no_{uid}")]
     ])
-    await context.bot.send_message(ADMIN_ID, f"💳 **New Order**\nUser: {uid}\nItem: {item}\nUTR: {utr}", reply_markup=kb)
-    await update.message.reply_text("✅ Sent for verification.")
+    await context.bot.send_message(ADMIN_ID, f"💳 **Order**\nUser: {uid}\nItem: {item}\nUTR: {utr}", reply_markup=kb)
+    await update.message.reply_text("✅ Verification Pending.")
     await show_main_menu(update, uid)
     return MAIN_MENU
 
-# --- ADMIN PANEL ---
+# --- ADMIN ---
 @check_status
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
@@ -330,20 +389,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data
     
     if "adm_ok_" in data:
-        # GRANT ACCESS LOGIC
         parts = data.split("_")
         uid, item = int(parts[2]), "_".join(parts[3:])
-        
-        if item == NUMBER_SHOT_KEY:
-            update_user_field(uid, "has_number_shot", True)
-        elif item in TARGET_PACKS:
-            update_user_field(uid, "target_access", item)
+        if item == NUMBER_SHOT_KEY: update_user_field(uid, "has_number_shot", True)
+        elif item in TARGET_PACKS: update_user_field(uid, "target_access", item)
         elif item in PREDICTION_PLANS:
-            # Grant Plan
             expiry = time.time() + PREDICTION_PLANS[item]['duration_seconds']
             update_user_field(uid, "prediction_status", "ACTIVE")
             update_user_field(uid, "expiry_timestamp", expiry)
-            
         await context.bot.send_message(uid, f"✅ **Activated:** {item}")
         await q.edit_message_text("✅ Approved")
 
@@ -351,6 +404,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         curr = is_maintenance_mode()
         set_maintenance_mode(not curr)
         await q.answer(f"Maintenance: {not curr}")
+        
+    elif "adm_gen" in data:
+        # Generate 1 day code by default for quick access
+        code = create_gift_code("1_day")
+        await q.message.reply_text(f"🎁 Code: `{code}`")
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
@@ -358,3 +416,15 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ban_user(int(context.args[0]), True)
         await update.message.reply_text("🚫 Banned.")
     except: pass
+    
+async def target_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Shortcut to target menu
+    return await target_menu_entry(update, context)
+
+async def packs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Shortcut to shop
+    return await shop_menu(update, context)
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_main_menu(update, update.effective_user.id)
+    return MAIN_MENU
