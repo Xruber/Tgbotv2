@@ -1,79 +1,50 @@
 import requests
 import time
-import logging
 
-logger = logging.getLogger(__name__)
-
-# Game API Endpoints
-URLS = {
-    "30s": {
-        "current": "https://draw.ar-lottery01.com/WinGo/WinGo_30S.json",
-        "history": "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
-    },
-    "1m": {
-        "current": "https://draw.ar-lottery01.com/WinGo/WinGo_1M.json",
-        "history": "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
-    }
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K)",
+    "Referer": "https://www.92lottery.com/"
 }
 
-def get_headers():
-    """Standard headers to mimic a browser."""
-    return {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-        "Referer": "https://www.92lottery.com/",
-        "Origin": "https://www.92lottery.com"
-    }
+URLS = {
+    "30s": "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json",
+    "1m": "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
+}
 
 def get_game_data(game_type="30s"):
-    """
-    Fetches Current Period and History.
-    Includes Fallback Logic if 'Current' API returns empty.
-    """
-    type_key = "1m" if game_type == "1m" else "30s"
-    urls = URLS[type_key]
-    timestamp = int(time.time() * 1000)
-    
-    current_period = None
-    clean_history = []
-    
+    """Fetch current period and history."""
+    url = URLS.get(game_type, URLS["30s"])
     try:
-        # --- 1. Try to get Current Period directly ---
-        try:
-            curr_resp = requests.get(f"{urls['current']}?ts={timestamp}", headers=get_headers(), timeout=5)
-            curr_data = curr_resp.json()
-            
-            # Check deep nested 'data' -> 'issueNumber'
-            if isinstance(curr_data, dict):
-                if 'data' in curr_data and isinstance(curr_data['data'], dict):
-                    current_period = curr_data['data'].get('issueNumber')
-                if not current_period:
-                    current_period = curr_data.get('issueNumber')
-        except:
-            pass # Continue to history fallback
-
-        # --- 2. Get History (Critical) ---
-        hist_resp = requests.get(f"{urls['history']}?ts={timestamp}&page=1&size=10", headers=get_headers(), timeout=5)
-        hist_data = hist_resp.json()
-        raw_list = hist_data.get('data', {}).get('list', [])
+        ts = int(time.time() * 1000)
+        resp = requests.get(f"{url}?ts={ts}&page=1&size=10", headers=HEADERS, timeout=5).json()
         
-        # Build History List
+        raw_list = resp.get('data', {}).get('list', [])
+        history = []
         for item in raw_list:
-            period = str(item['issueNumber'])
-            result_num = int(item['number'])
-            outcome = "Small" if result_num <= 4 else "Big"
-            clean_history.append({'p': period, 'r': result_num, 'o': outcome})
+            p = str(item['issueNumber'])
+            res = int(item['number'])
+            out = "Big" if res >= 5 else "Small"
+            history.append({'p': p, 'r': res, 'o': out})
             
-        clean_history.reverse() # Oldest to Newest
+        history.reverse() # Oldest first
         
-        # --- 3. FALLBACK: Calculate Period from History ---
-        # If the main API failed to give us the current period, we calculate it:
-        # Current Period = (Last Result Period) + 1
-        if not current_period and clean_history:
-            last_issue = int(clean_history[-1]['p'])
-            current_period = str(last_issue + 1)
-
-        return str(current_period) if current_period else None, clean_history
-
+        if not history: return None, []
+        
+        # Calculate Next Period (Current)
+        last_p = int(history[-1]['p'])
+        current_p = str(last_p + 1)
+        
+        return current_p, history
     except Exception as e:
-        logger.error(f"API Error ({game_type}): {e}")
+        print(f"API Error: {e}")
         return None, []
+
+def check_result_exists(game_type, period_to_check):
+    """
+    CRITICAL FIX: Checks if the result for 'period_to_check' is actually published.
+    """
+    _, history = get_game_data(game_type)
+    for item in history:
+        if str(item['p']) == str(period_to_check):
+            return True, item['o'] # Result found, return Outcome
+    return False, None
