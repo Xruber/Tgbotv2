@@ -1,66 +1,74 @@
 import hashlib
+import random
 from config import BETTING_SEQUENCE, MAX_LEVEL
 
 def get_bet_unit(level):
-    if level <= MAX_LEVEL:
-        return BETTING_SEQUENCE[level-1]
-    return BETTING_SEQUENCE[-1]
+    """Returns the betting multiplier for the current level."""
+    # Safety check for index out of bounds
+    if level < 1: level = 1
+    if level > MAX_LEVEL: level = MAX_LEVEL
+    return BETTING_SEQUENCE[level-1]
 
 def analyze_history_trend(history):
     """
-    Returns 'Big', 'Small' or None based on last 5 results.
+    Analyzes the last 5 results to find a trend pattern.
+    Returns: 'Big', 'Small', or None
     """
     if not history or len(history) < 5: return None
-    outcomes = [h['o'] for h in history[-5:]]
+    outcomes = [h['o'] for h in history[-5:]] # Get last 5 outcomes
     
-    # 1. ZigZag Check (B S B S)
+    # 1. ZigZag Pattern (B S B S -> Predict B)
+    # Checks if the last 3 are alternating
     if outcomes[-1] != outcomes[-2] and outcomes[-2] != outcomes[-3]:
-        # Predict opposite of last
+        # Predict the opposite of the last result
         return "Small" if outcomes[-1] == "Big" else "Big"
     
-    # 2. Streak Check (B B B)
+    # 2. Streak Pattern (B B B -> Predict B)
+    # Checks if the last 3 are the same
     if outcomes[-1] == outcomes[-2] == outcomes[-3]:
         return outcomes[-1]
         
     return None
 
-def get_v5_plus_prediction(period_number, history):
+def get_v5_logic(period_number, game_type="30s", history=None):
     """
-    V5+ Logic: 
-    1. SHA256 Hash of Period.
-    2. Extract last digit.
+    V5+ Engine Logic:
+    1. SHA256 Hash of the Period Number.
+    2. Extract the last numeric digit from the hash.
     3. Confluence Check:
-       - Strong Digits (0,1,2,3, 6,7,8,9): Trust SHA directly.
-       - Weak Digits (4, 5): These are volatile. Check History Trend.
-         If Trend exists, follow Trend. If no trend, default to SHA.
+       - If digit is 0,1,2,3 -> Trust Small
+       - If digit is 6,7,8,9 -> Trust Big
+       - If digit is 4 or 5 (Volatile) -> Check History Trend.
+    
+    Returns: (Prediction, Pattern_Name, Digit)
     """
-    # 1. SHA256
+    # 1. SHA256 Hash
     data_str = str(period_number)
     hash_hex = hashlib.sha256(data_str.encode('utf-8')).hexdigest()
     
-    # Find last numeric digit
+    # 2. Find Last Numeric Digit
     digit = 0
     for char in reversed(hash_hex):
         if char.isdigit():
             digit = int(char)
             break
-            
-    # Default SHA Prediction
-    # 0-4 Small, 5-9 Big
-    sha_pred = "Big" if digit >= 5 else "Small"
     
-    # 2. Confluence (3-Level Accuracy)
-    logic_note = f"V5 SHA ({digit})"
+    # 3. Base Prediction (Standard SHA)
+    # 0-4 is Small, 5-9 is Big
+    sha_prediction = "Big" if digit >= 5 else "Small"
     
-    # Volatility Check (4 and 5 are often switch points in Wingo)
-    if digit in [4, 5]: 
+    # 4. Confluence Check (The V5+ Upgrade)
+    pattern_name = f"V5 Argon ({digit})"
+    
+    # If we have history, we can do advanced checks for volatile digits 4 & 5
+    if history and digit in [4, 5]:
         trend_pred = analyze_history_trend(history)
         if trend_pred:
             final_pred = trend_pred
-            logic_note = f"V5+ Trend Fix ({digit})"
+            pattern_name = f"V5+ Trend Fix ({digit})"
         else:
-            final_pred = sha_pred
+            final_pred = sha_prediction
     else:
-        final_pred = sha_pred
+        final_pred = sha_prediction
         
-    return final_pred, logic_note
+    return final_pred, pattern_name, digit
