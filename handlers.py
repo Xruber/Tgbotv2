@@ -10,9 +10,9 @@ from api_helper import get_game_data, check_result_exists
 from prediction_engine import get_v5_logic, get_bet_unit
 from target_engine import start_target_session, process_target_outcome
 
-# --- DECORATOR: THE FIX FOR BAN/MAINTENANCE ---
+# --- 1. ACCESS CONTROL DECORATORS & HELPERS ---
 def check_status(func):
-    """Wraps every handler to check Ban/Maintenance FIRST."""
+    """Wraps handlers to check BAN and MAINTENANCE only."""
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
@@ -32,17 +32,41 @@ def check_status(func):
         return await func(update, context, *args, **kwargs)
     return wrapper
 
+async def check_subscription(update, user_id):
+    """Returns True if user has Active Plan or Trial."""
+    ud = get_user_data(user_id)
+    
+    # 1. Check Active Plan
+    if ud.get("prediction_status") == "ACTIVE" and ud.get("expiry_timestamp", 0) > time.time():
+        return True
+        
+    # 2. Check 5-Minute Free Trial
+    joined_at = ud.get("joined_at", 0)
+    if (time.time() - joined_at) < 300: # 300 seconds = 5 mins
+        return True
+        
+    # 3. Access Denied
+    msg = "🔒 **VIP ACCESS REQUIRED**\n\nYour free trial has ended or your plan expired."
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Buy Plan", callback_data="nav_shop")]])
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, reply_markup=kb)
+    else:
+        await update.message.reply_text(msg, reply_markup=kb)
+    return False
+
 def get_text(user_id, key):
     ud = get_user_data(user_id)
     lang = ud.get("language", "en")
     return TEXTS.get(lang, TEXTS["en"]).get(key, key)
 
-# --- START & MENU ---
+# --- 2. MAIN MENU & NAVIGATION ---
 @check_status
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ud = get_user_data(user_id)
     
+    # Force Language if not set
     if not ud.get("language"):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en"), 
@@ -66,13 +90,15 @@ async def show_main_menu(update_obj, user_id):
     txt = get_text(user_id, "main_menu")
     ud = get_user_data(user_id)
     
-    # Status Line
+    # Status Line Logic
     if ud.get("prediction_status") == "ACTIVE" and ud.get("expiry_timestamp") > time.time():
-        status = f"💎 **VIP:** Active"
+        expiry = int(ud.get("expiry_timestamp"))
+        days_left = int((expiry - time.time()) / 86400)
+        status = f"💎 **VIP Active:** {days_left} Days"
     elif (time.time() - ud.get("joined_at", 0)) < 300:
-        status = f"⏳ **Trial:** Active (5m)"
+        status = f"⏳ **Trial Active:** 5 Mins"
     else:
-        status = f"🔒 **Status:** Free/Expired"
+        status = f"🔒 **Status:** Expired/Free"
         
     msg = f"{status}\n\n{txt}"
     kb = InlineKeyboardMarkup([
@@ -90,10 +116,9 @@ async def show_main_menu(update_obj, user_id):
         await update_obj.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
     return MAIN_MENU
 
-# --- PROFILE & COMMANDS ---
+# --- 3. PROFILE & COMMANDS ---
 @check_status
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows user stats."""
     if update.callback_query: await update.callback_query.answer()
     uid = update.effective_user.id
     ud = get_user_data(uid)
@@ -113,11 +138,12 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📉 Losses: **{losses}**\n"
         f"📊 Win Rate: **{rate}%**"
     )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="nav_home")]])
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="nav_home")]]), parse_mode="Markdown")
+        await update.callback_query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
     else:
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
     return MAIN_MENU
 
 @check_status
@@ -126,11 +152,10 @@ async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔗 **Invite Link:**\n`{link}`\n\nShare to earn rewards!")
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Reset language so prompt appears again
     update_user_field(update.effective_user.id, "language", None)
     return await start_command(update, context)
 
-# --- REDEEM SYSTEM ---
+# --- 4. REDEEM SYSTEM ---
 @check_status
 async def redeem_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
@@ -150,11 +175,16 @@ async def redeem_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {msg}. Try again or /cancel.")
         return REDEEM_PROCESS
 
-# --- PREDICTION ENGINE ---
+# --- 5. PREDICTION ENGINE (FIXED ACCESS) ---
 @check_status
 async def start_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    
+    # 🔥 CRITICAL FIX: CHECK SUBSCRIPTION BEFORE ALLOWING ENTRY
+    if not await check_subscription(update, q.from_user.id):
+        return MAIN_MENU
+    
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🕒 30s", callback_data="game_30s"), InlineKeyboardButton("🕐 1m", callback_data="game_1m")],
         [InlineKeyboardButton("🔙 Back", callback_data="nav_home")]
@@ -226,14 +256,16 @@ async def handle_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await prediction_logic(update, context)
     return PREDICTION_LOOP
 
-# --- TARGET SYSTEM (6-Levels) ---
+# --- 6. TARGET SYSTEM ---
 @check_status
 async def target_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    
+    # Auto-resume logic
     ud = get_user_data(q.from_user.id)
     if ud.get("target_session"):
-        return await target_loop_handler(update, context) # Re-enter loop
+        return await target_loop_handler(update, context)
         
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🕒 30s", callback_data="tgt_start_30s"), InlineKeyboardButton("🕐 1m", callback_data="tgt_start_1m")],
@@ -293,9 +325,8 @@ async def target_loop_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await show_main_menu(update, q.from_user.id)
         return MAIN_MENU
 
-    # If re-entering loop without clicking win/loss (e.g. from menu)
     if "tgt_" not in q.data:
-         # Use stored session to display
+         # Resume display
          ud = get_user_data(q.from_user.id)
          if ud.get("target_session"):
              await display_target_ui(q, ud.get("target_session"))
@@ -315,7 +346,7 @@ async def target_loop_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     await display_target_ui(q, sess)
     return TARGET_LOOP
 
-# --- SHOP & ADMIN ---
+# --- 7. SHOP & ADMIN ---
 @check_status
 async def shop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -351,7 +382,6 @@ async def shop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "nav_shop":
         return await shop_menu(update, context)
         
-    # Buy Process
     item_key = data.replace("buy_", "")
     msg = f"💳 **INVOICE**\nItem: {item_key}\n\nPay via UPI and send UTR."
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="nav_shop")]])
@@ -374,13 +404,14 @@ async def handle_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, uid)
     return MAIN_MENU
 
-# --- ADMIN ---
+# --- 8. ADMIN PANEL & BROADCAST ---
 @check_status
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛠 Toggle Maintenance", callback_data="adm_maint")],
-        [InlineKeyboardButton("🎁 Gen Code", callback_data="adm_gen")]
+        [InlineKeyboardButton("🛠 Maintenance", callback_data="adm_maint")],
+        [InlineKeyboardButton("🎁 Gen Code", callback_data="adm_gen")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="adm_broadcast")]
     ])
     await update.message.reply_text("👮 Admin", reply_markup=kb)
 
@@ -406,9 +437,39 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer(f"Maintenance: {not curr}")
         
     elif "adm_gen" in data:
-        # Generate 1 day code by default for quick access
         code = create_gift_code("1_day")
         await q.message.reply_text(f"🎁 Code: `{code}`")
+
+async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin Broadcast Entry."""
+    q = update.callback_query
+    if update.effective_user.id != ADMIN_ID: return
+    await q.answer()
+    await q.edit_message_text("📢 **Send the message to broadcast:**\n(Type /cancel to abort)")
+    return ADMIN_BROADCAST_MSG
+
+async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin Broadcast Sender."""
+    if update.effective_user.id != ADMIN_ID: return ConversationHandler.END
+    msg = update.message.text
+    
+    users = get_all_user_ids()
+    count = 0
+    await update.message.reply_text("⏳ Sending...")
+    
+    for u in users:
+        try:
+            await context.bot.send_message(u['user_id'], f"📢 **ANNOUNCEMENT**\n\n{msg}")
+            count += 1
+            await asyncio.sleep(0.05)
+        except: pass
+        
+    await update.message.reply_text(f"✅ Sent to {count} users.")
+    return ConversationHandler.END
+
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Cancelled")
+    return ConversationHandler.END
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
@@ -418,11 +479,9 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
     
 async def target_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Shortcut to target menu
     return await target_menu_entry(update, context)
 
 async def packs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Shortcut to shop
     return await shop_menu(update, context)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
