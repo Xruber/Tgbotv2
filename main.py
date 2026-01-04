@@ -26,6 +26,10 @@ from handlers_admin import (
     ban_user_command, unban_user_command, gift_generation
 )
 
+# Setup Logger
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # --- LANGUAGE & STARTUP ---
 async def set_language(update: Update, context):
     q = update.callback_query
@@ -116,7 +120,7 @@ async def redeem_command(update: Update, context):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # 1. COMMANDS
+    # 1. BASIC COMMANDS
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", admin_command)) 
     app.add_handler(CommandHandler("redeem", redeem_command))
@@ -127,23 +131,29 @@ def main():
     app.add_handler(CommandHandler("invite", invite_command))
     app.add_handler(CommandHandler("reset", reset_command))
     
-    # 2. LANG & NAV
+    # 2. GLOBAL HANDLERS
     app.add_handler(CallbackQueryHandler(set_language, pattern="^lang_"))
     app.add_handler(CallbackQueryHandler(back_home_handler, pattern="^back_home$"))
     app.add_handler(CallbackQueryHandler(redeem_hint, pattern="^btn_redeem_hint$"))
-    
-    # 3. GLOBAL CALLBACKS (CRITICAL: REGISTER ADMIN ACTION FIRST)
-    # This handles the Approve/Reject buttons
     app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) 
 
-    # 4. CONVERSATION HANDLERS
+    # 3. CONVERSATION HANDLERS (With /admin as fallback everywhere)
+    
+    # Common fallbacks for all menus
+    common_fallbacks = [
+        CallbackQueryHandler(back_home_handler, pattern="^back_home$"),
+        CommandHandler("start", start_command),
+        CommandHandler("admin", admin_command),  # <--- CRITICAL FIX: Allows /admin even if stuck
+        CommandHandler("cancel", cancel)
+    ]
+
     admin_h = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_callback, pattern="^adm_")],
         states={
             ADMIN_BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_broadcast)],
             ADMIN_GIFT_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gift_generation)]
         },
-        fallbacks=[CommandHandler("cancel", cancel_broadcast)],
+        fallbacks=common_fallbacks,
         per_user=True
     )
     app.add_handler(admin_h)
@@ -154,7 +164,7 @@ def main():
             SELECTING_GAME_TYPE: [CallbackQueryHandler(start_game_flow, pattern="^game_")],
             WAITING_FOR_FEEDBACK: [CallbackQueryHandler(handle_feedback, pattern="^check_")]
         },
-        fallbacks=[CallbackQueryHandler(back_home_handler, pattern="^back_home$"), CommandHandler("start", start_command)],
+        fallbacks=common_fallbacks,
         allow_reentry=True
     )
     app.add_handler(pred_h)
@@ -169,7 +179,7 @@ def main():
             WAITING_FOR_PAYMENT_PROOF: [CallbackQueryHandler(confirm_sent, pattern="^sent$")],
             WAITING_FOR_UTR: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_utr)]
         },
-        fallbacks=[CallbackQueryHandler(back_home_handler, pattern="^back_home$"), CommandHandler("start", start_command)],
+        fallbacks=common_fallbacks,
         allow_reentry=True
     )
     app.add_handler(buy_h)
@@ -181,16 +191,20 @@ def main():
             TARGET_SELECT_GAME: [CallbackQueryHandler(start_target_game, pattern="^tgt_game_")],
             TARGET_GAME_LOOP: [CallbackQueryHandler(target_loop, pattern="^tgt_")]
         },
-        fallbacks=[CallbackQueryHandler(back_home_handler, pattern="^back_home$"), CommandHandler("start", start_command)],
+        fallbacks=common_fallbacks,
         allow_reentry=True
     )
     app.add_handler(target_h)
 
-    # 5. REMAINING GLOBAL CALLBACKS
+    # 4. OTHER CALLBACKS
     app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats")) 
     app.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_"))
 
-    print("🤖 Bot Online (Admin Fix + Pay Block)")
+    print("--------------------------------------------------")
+    print(f"✅ Bot Online")
+    print(f"🔑 ADMIN_ID loaded as: {ADMIN_ID}")
+    print("--------------------------------------------------")
+    
     app.run_polling()
 
 if __name__ == "__main__":
