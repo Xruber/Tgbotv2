@@ -5,20 +5,17 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import *
 from database import get_user_data, is_user_banned, is_maintenance_mode
 
-# --- DECORATOR: ACCESS CONTROL ---
+# --- ACCESS CONTROL ---
 def check_status(func):
-    """Wraps handlers to check BAN and MAINTENANCE status first."""
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
         
-        # 1. Check Ban
         if is_user_banned(user_id):
             if update.callback_query: await update.callback_query.answer("🚫 BANNED", show_alert=True)
             else: await update.message.reply_text("🚫 **YOU ARE BANNED.**")
             return ConversationHandler.END
             
-        # 2. Check Maintenance (Bypass for Admin)
         if is_maintenance_mode() and user_id != ADMIN_ID:
             if update.callback_query: await update.callback_query.answer("🛠 MAINTENANCE", show_alert=True)
             else: await update.message.reply_text("🛠 **SYSTEM UNDER MAINTENANCE.**")
@@ -27,22 +24,17 @@ def check_status(func):
         return await func(update, context, *args, **kwargs)
     return wrapper
 
-# --- HELPERS ---
 async def check_subscription(update, user_id):
-    """Checks if user has active VIP or valid Free Trial."""
     ud = get_user_data(user_id)
-    
     # 1. Active Plan
     if ud.get("prediction_status") == "ACTIVE" and ud.get("expiry_timestamp", 0) > time.time():
         return True
-    
     # 2. Free Trial (5 Mins)
     if (time.time() - ud.get("joined_at", 0)) < 300:
         return True
     
     msg = "🔒 **VIP ACCESS REQUIRED**\n\nYour free trial has ended."
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Buy Plan", callback_data="nav_shop")]])
-    
     if update.callback_query: await update.callback_query.edit_message_text(msg, reply_markup=kb)
     else: await update.message.reply_text(msg, reply_markup=kb)
     return False
@@ -53,7 +45,6 @@ def get_text(user_id, key):
     return TEXTS.get(lang, TEXTS["en"]).get(key, key)
 
 def draw_bar(percent, length=10, style="blocks"):
-    """Visual Progress Bar."""
     percent = max(0.0, min(1.0, percent))
     filled_len = int(length * percent)
     if style == "blocks":
@@ -67,7 +58,7 @@ def draw_bar(percent, length=10, style="blocks"):
         bar = "█" * filled_len + " " * (length - filled_len)
     return f"[{bar}] {int(percent * 100)}%"
 
-# --- MAIN MENU DISPLAY ---
+# --- SHARED UI ---
 async def display_main_menu(update_obj, user_id, context):
     txt = get_text(user_id, "main_menu")
     ud = get_user_data(user_id)
