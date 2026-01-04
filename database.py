@@ -1,83 +1,128 @@
 import time
 import random
-import string
 import logging
+import uuid
+from datetime import datetime
 from pymongo import MongoClient
 from config import MONGO_URI
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+users_collection = None 
+settings_collection = None
+codes_collection = None
 
 try:
     client = MongoClient(MONGO_URI)
-    db = client.prediction_pro_db
-    users_col = db.users
-    codes_col = db.codes
-    settings_col = db.settings
-    logger.info("✅ MongoDB Connected.")
+    db = client.prediction_bot_db
+    users_collection = db.users
+    settings_collection = db.settings
+    codes_collection = db.codes
+    logger.info("✅ Successfully connected to MongoDB.")
 except Exception as e:
-    logger.error(f"❌ DB Error: {e}")
-
-def get_user_data(user_id):
-    user = users_col.find_one({"user_id": user_id})
-    if not user:
-        user = {
-            "user_id": user_id,
-            "language": None,
-            "joined_at": time.time(),
-            "prediction_status": "NONE",
-            "expiry_timestamp": 0,
-            "is_banned": False,
-            "current_level": 1,
-            "total_wins": 0,
-            "total_losses": 0,
-            "balance": 0,
-            "target_access": None,
-            "has_number_shot": False, # Restored
-            "target_session": None
-        }
-        users_col.insert_one(user)
-    return user
+    logger.error(f"❌ Failed to connect to MongoDB: {e}")
 
 def update_user_field(user_id, field, value):
-    users_col.update_one({"user_id": user_id}, {"$set": {field: value}})
+    if users_collection is not None:
+        users_collection.update_one({"user_id": user_id}, {"$set": {field: value}})
 
 def increment_user_field(user_id, field, amount=1):
-    users_col.update_one({"user_id": user_id}, {"$inc": {field: amount}})
+    if users_collection is not None:
+        users_collection.update_one({"user_id": user_id}, {"$inc": {field: amount}})
 
-# --- Admin & Systems ---
-def is_user_banned(user_id):
-    u = users_col.find_one({"user_id": user_id})
-    return u.get("is_banned", False) if u else False
+def get_user_data(user_id):
+    if users_collection is None: return {}
+    
+    user = users_collection.find_one({"user_id": user_id})
+    if user is None:
+        user = {
+            "user_id": user_id,
+            "username": None,
+            "language": None,  # NEW
+            "is_banned": False, # NEW
+            "prediction_status": "NONE", 
+            "prediction_plan": None,
+            "expiry_timestamp": 0,
+            "current_level": 1, 
+            "current_prediction": random.choice(['Small', 'Big']),
+            "history": [], 
+            "current_pattern_name": "Random (New User)", 
+            "prediction_mode": "V5", # DEFAULT V5+
+            "has_number_shot": False,
+            "target_access": None,
+            "target_session": None,
+            "sureshot_session": None,
+            "referred_by": None,
+            "referral_purchases": 0,
+            "total_wins": 0,
+            "total_losses": 0
+        }
+        users_collection.insert_one(user)
+    
+    # Defaults for existing users
+    defaults = {
+        "language": "EN", "is_banned": False, "prediction_mode": "V5"
+    }
+    for key, val in defaults.items():
+        if key not in user: user[key] = val
 
-def ban_user(user_id, status: bool):
-    users_col.update_one({"user_id": user_id}, {"$set": {"is_banned": status}})
+    if user.get("prediction_status") == "ACTIVE" and user.get("expiry_timestamp", 0) < time.time():
+        update_user_field(user_id, "prediction_status", "NONE")
+        user["prediction_status"] = "NONE"
+        
+    return user
 
-def is_maintenance_mode():
-    s = settings_col.find_one({"_id": "config"})
-    return s.get("maintenance", False) if s else False
+# --- GLOBAL SETTINGS (Maintenance) ---
+def get_settings():
+    if settings_collection is None: return {"maintenance_mode": False}
+    s = settings_collection.find_one({"_id": "global_settings"})
+    if not s:
+        s = {"_id": "global_settings", "maintenance_mode": False}
+        settings_collection.insert_one(s)
+    return s
 
 def set_maintenance_mode(status: bool):
-    settings_col.update_one({"_id": "config"}, {"$set": {"maintenance": status}}, upsert=True)
+    if settings_collection:
+        settings_collection.update_one({"_id": "global_settings"}, {"$set": {"maintenance_mode": status}}, upsert=True)
 
-# --- Codes ---
-def create_gift_code(plan_type):
-    code = "GIFT-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    codes_col.insert_one({"code": code, "plan": plan_type, "redeemed": False})
+# --- GIFT CODES ---
+def create_gift_code(plan_type, duration):
+    code = f"GIFT-{uuid.uuid4().hex[:8].upper()}"
+    codes_collection.insert_one({
+        "code": code,
+        "plan_type": plan_type,
+        "duration": duration,
+        "is_redeemed": False
+    })
     return code
 
-def redeem_code(user_id, code):
-    c = codes_col.find_one({"code": code, "redeemed": False})
-    if not c: return False, "Invalid Code"
+def redeem_gift_code(code, user_id):
+    c = codes_collection.find_one({"code": code, "is_redeemed": False})
+    if not c: return False, "Invalid or Redeemed Code"
     
-    # Unlock Logic
-    from config import PREDICTION_PLANS
-    plan = PREDICTION_PLANS.get(c['plan'])
-    if not plan: return False, "Config Error"
+    # Apply
+    expiry = time.time() + c['duration']
+    update_user_field(user_id, "prediction_status", "ACTIVE")
+    update_user_field(user_id, "expiry_timestamp", int(expiry))
     
-    expiry = time.time() + plan['duration_seconds']
-    users_col.update_one({"user_id": user_id}, {
-        "$set": {"prediction_status": "ACTIVE", "expiry_timestamp": expiry}
-    })
-    codes_col.update_one({"_id": c['_id']}, {"$set": {"redeemed": True, "redeemed_by": user_id}})
-    return True, plan['name']
+    codes_collection.update_one({"_id": c["_id"]}, {"$set": {"is_redeemed": True, "redeemed_by": user_id}})
+    return True, c['plan_type']
+
+# --- ADMIN STATS ---
+def get_total_users(): return users_collection.count_documents({}) if users_collection else 0
+def get_active_subs_count(): return users_collection.count_documents({"prediction_status": "ACTIVE", "expiry_timestamp": {"$gt": time.time()}}) if users_collection else 0
+def get_all_user_ids(): return users_collection.find({}, {"user_id": 1}) if users_collection else []
+def get_top_referrers(limit=10): return list(users_collection.find().sort("referral_purchases", -1).limit(limit)) if users_collection else []
+
+def is_subscription_active(user_data) -> bool:
+    return user_data.get("prediction_status") == "ACTIVE" and user_data.get("expiry_timestamp", 0) > time.time()
+
+def get_remaining_time_str(user_data) -> str:
+    expiry_timestamp = user_data.get("expiry_timestamp", 0)
+    remaining = int(expiry_timestamp - time.time())
+    if remaining > 1000000000: return "Permanent"
+    if remaining <= 0: return "Expired"
+    days = remaining // 86400
+    hours = (remaining % 86400) // 3600
+    return f"{days}d {hours}h"
