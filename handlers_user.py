@@ -49,7 +49,6 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- USER FEATURES ---
 @check_status
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Detailed Profile with Stats."""
     if update.callback_query: await update.callback_query.answer()
     uid = update.effective_user.id
     ud = get_user_data(uid)
