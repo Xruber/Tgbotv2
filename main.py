@@ -8,20 +8,24 @@ from config import (
     SHOP_MENU, WAITING_UTR, REDEEM_PROCESS, TARGET_MENU, TARGET_LOOP,
     ADMIN_BROADCAST_MSG
 )
-from handlers import (
-    start_command, set_language, back_to_menu, start_prediction, 
-    prediction_logic, handle_result, shop_menu, shop_callback,
-    profile_command, redeem_entry, redeem_process, 
-    admin_panel, admin_callback, 
-    invite_command, packs_command, target_command, language_command, cancel,
-    target_menu_entry, start_target_game, target_loop_handler, handle_utr,
-    admin_broadcast_entry, admin_send_broadcast
+# IMPORT FROM SPLIT FILES
+from handlers_user import (
+    start_command, set_language, back_to_menu, stats_command,
+    invite_command, reset_command, redeem_entry, redeem_process,
+    admin_panel, admin_callback, admin_referral_stats_command, ban_command,
+    admin_broadcast_entry, admin_send_broadcast, cancel_broadcast, cancel,
+    language_command
+)
+from handlers_game import (
+    start_prediction, prediction_logic, handle_result,
+    target_menu_entry, start_target_game, target_loop_handler,
+    shop_menu, shop_callback, handle_utr, packs_command, target_command
 )
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    conv = ConversationHandler(
+    main_conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start_command),
             CommandHandler("language", language_command),
@@ -34,7 +38,7 @@ def main():
                 CallbackQueryHandler(start_prediction, pattern="^nav_pred$"),
                 CallbackQueryHandler(shop_menu, pattern="^nav_shop$"),
                 CallbackQueryHandler(target_menu_entry, pattern="^nav_target_menu$"),
-                CallbackQueryHandler(profile_command, pattern="^nav_profile$"),
+                CallbackQueryHandler(stats_command, pattern="^nav_profile$"),
                 CallbackQueryHandler(redeem_entry, pattern="^nav_redeem$"),
                 CallbackQueryHandler(back_to_menu, pattern="^nav_home$") 
             ],
@@ -67,28 +71,36 @@ def main():
             
             REDEEM_PROCESS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, redeem_process)
-            ],
-            
-            ADMIN_BROADCAST_MSG: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_broadcast)
             ]
         },
         fallbacks=[
             CommandHandler("start", start_command), 
-            CommandHandler("cancel", cancel),
-            CommandHandler("admin", admin_panel)
+            CommandHandler("cancel", cancel)
         ]
     )
     
-    app.add_handler(conv)
+    broadcast_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_broadcast_entry, pattern="^adm_broadcast$")],
+        states={
+            ADMIN_BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_broadcast)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_broadcast)]
+    )
+    
+    app.add_handler(broadcast_conv)
+    app.add_handler(main_conv)
+    
+    # Global Commands
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("invite", invite_command))
     app.add_handler(CommandHandler("packs", packs_command))
     app.add_handler(CommandHandler("target", target_command))
-    app.add_handler(CommandHandler("profile", profile_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("reset", reset_command))
+    app.add_handler(CommandHandler("refs", admin_referral_stats_command))
+    app.add_handler(CommandHandler("ban", ban_command))
     
-    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^adm_"))
-    app.add_handler(CallbackQueryHandler(admin_broadcast_entry, pattern="^adm_broadcast$"))
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^adm_(ok|no|maint|gen)"))
 
     print("🤖 V5 Pro Bot Online.")
     app.run_polling()
