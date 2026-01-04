@@ -12,7 +12,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ud = get_user_data(user_id)
     
-    # Referral Tracking
     if context.args and not ud.get("referred_by"):
         try:
             ref_id = int(context.args[0])
@@ -42,10 +41,15 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await display_main_menu(update, q.from_user.id, context)
     return MAIN_MENU
 
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resets language preference."""
+    update_user_field(update.effective_user.id, "language", None)
+    return await start_command(update, context)
+
 # --- USER FEATURES ---
 @check_status
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Detailed Profile Stats."""
+    """Detailed Profile with Stats."""
     if update.callback_query: await update.callback_query.answer()
     uid = update.effective_user.id
     ud = get_user_data(uid)
@@ -55,10 +59,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = wins + losses
     rate = (wins/total) if total > 0 else 0.0
     
-    if total < 10: rank = "👶 Rookie"
-    elif rate > 0.8: rank = "🎯 **Sniper**"
-    elif rate > 0.6: rank = "💼 **Pro Trader**"
-    else: rank = "🛠 **Grinder**"
+    rank = "🛠 Grinder"
+    if total > 10:
+        if rate > 0.8: rank = "🎯 Sniper"
+        elif rate > 0.6: rank = "💼 Pro"
     
     rate_bar = draw_bar(rate, 10, "blocks")
     
