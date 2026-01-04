@@ -43,10 +43,10 @@ async def show_user_stats(update_obj, user_id):
     )
     
     if isinstance(update_obj, Update) and update_obj.callback_query:
-        await update_obj.callback_query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_start")]]))
+        await update_obj.callback_query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_home")]]))
     else:
-        await update_obj.message.reply_text(msg, parse_mode="Markdown")
-
+        await update_obj.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_home")]]))
+        
 async def switch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = get_user_data(update.effective_user.id)
     if not is_subscription_active(user_data):
@@ -111,4 +111,5 @@ async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💡 _Payouts are processed manually. DM Support to claim._"
         f"━━━━━━━━━━━━━━\n",
         parse_mode="Markdown"
+
     )
