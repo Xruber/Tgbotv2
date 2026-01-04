@@ -39,11 +39,10 @@ async def prediction_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("⚠️ API Error", show_alert=True)
             return PREDICTION_LOOP
             
-        # Default V5 Engine
         pred, logic, _ = get_v5_logic(period, gtype, history)
         context.user_data["current_period"] = period
         
-        # Number Shot Logic
+        # Number Shot
         ud = get_user_data(uid)
         shot_txt = ""
         if ud.get("has_number_shot"):
@@ -202,14 +201,22 @@ async def shop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "buy_" in data:
         item_key = data.replace("buy_", "")
         context.user_data["buying"] = item_key
+        
         caption = f"💳 **INVOICE**\n\nItem: {item_key}\n\nPay via UPI (Scan QR).\nSend UTR below."
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="nav_shop")]])
         
-        try: await q.message.delete()
-        except: pass
+        # 1. Send Loading Message
+        loading = await context.bot.send_message(chat_id=q.from_user.id, text="⏳ **Generating Invoice...**", parse_mode="Markdown")
         
-        try: await context.bot.send_photo(chat_id=q.from_user.id, photo=PAYMENT_IMAGE_URL, caption=caption, reply_markup=kb, parse_mode="Markdown")
-        except: await context.bot.send_message(chat_id=q.from_user.id, text=caption + "\n\n⚠️ Image failed.", reply_markup=kb, parse_mode="Markdown")
+        # 2. Try sending Photo
+        try: 
+            await q.message.delete()
+            await context.bot.send_photo(chat_id=q.from_user.id, photo=PAYMENT_IMAGE_URL, caption=caption, reply_markup=kb, parse_mode="Markdown")
+            await loading.delete()
+        except Exception as e:
+            # 3. Fallback to Text if image fails
+            await loading.edit_text(caption + "\n\n⚠️ *Image failed to load. Use Text Invoice.*", reply_markup=kb, parse_mode="Markdown")
+            
         return WAITING_UTR
     return SHOP_MENU
 
