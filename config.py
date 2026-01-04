@@ -6,6 +6,7 @@ load_dotenv()
 # --- Configuration ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGO_URI_HERE")
+# REPLACE WITH YOUR REAL ADMIN ID
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
 
 # --- Constants ---
@@ -38,6 +39,7 @@ LANGUAGES = {
 
 # --- Subscription Plans ---
 PREDICTION_PLANS = {
+    "1_day": {"name": "1 Day Access", "price": "100₹", "duration_seconds": 86400},
     "7_day": {"name": "7 Day Access", "price": "300₹", "duration_seconds": 604800},
     "permanent": {"name": "Permanent Access", "price": "500₹", "duration_seconds": 1576800000},
 }
