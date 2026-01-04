@@ -1,5 +1,5 @@
 import asyncio
-import uuid
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, ADMIN_BROADCAST_MSG, ADMIN_GIFT_WAIT
@@ -8,155 +8,209 @@ from database import (
     get_active_subs_count, 
     get_all_user_ids, 
     get_top_referrers,
-    set_maintenance_mode, 
+    set_maintenance_mode,
+    get_settings, 
     update_user_field, 
     create_gift_code
 )
 
+# Setup Logger
+logger = logging.getLogger(__name__)
+
 # --- MAIN ADMIN MENU ---
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Opens the Admin Control Panel."""
-    if update.effective_user.id != ADMIN_ID: return
+    """Opens the Admin Control Panel with 7 exact buttons."""
+    user_id = update.effective_user.id
     
-    total_users = get_total_users()
-    active_subs = get_active_subs_count()
+    # 1. Permission Check
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("🚫 **Access Denied.**")
+        return
+    
+    # 2. Get Data
+    total = get_total_users()
+    active = get_active_subs_count()
+    is_maint = get_settings().get("maintenance_mode", False)
+    maint_status = "🔴 ON" if is_maint else "🟢 OFF"
     
     msg = (
         f"🔒 **ADMIN DASHBOARD**\n"
         f"━━━━━━━━━━━━━━\n"
-        f"👤 **Total Users:** {total_users}\n"
-        f"💎 **Active VIPs:** {active_subs}\n"
-        f"🟢 **System Status:** Online\n"
+        f"👥 Users: `{total}`\n"
+        f"💎 VIPs: `{active}`\n"
+        f"🔧 Maintenance: **{maint_status}**\n"
         f"━━━━━━━━━━━━━━\n"
-        f"👇 Select Action:"
+        f"👇 **Select Action:**"
     )
     
+    # 3. THE 7 BUTTONS LAYOUT
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Broadcast", callback_data="adm_broadcast"), InlineKeyboardButton("🎁 Create Gift", callback_data="adm_gift")],
-        [InlineKeyboardButton("🛑 Maint. ON", callback_data="adm_maint_on"), InlineKeyboardButton("🟢 Maint. OFF", callback_data="adm_maint_off")],
-        [InlineKeyboardButton("📊 Ref Stats", callback_data="adm_ref_stats"), InlineKeyboardButton("🚫 Ban Help", callback_data="adm_ban_help")],
-        [InlineKeyboardButton("❌ Close", callback_data="adm_close")]
+        [InlineKeyboardButton("🛠 Maintenance", callback_data="adm_maint_toggle"), InlineKeyboardButton("🎁 Gen Code", callback_data="adm_gift_menu")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="adm_broadcast"), InlineKeyboardButton("📊 Ref Stats", callback_data="adm_ref_stats")],
+        [InlineKeyboardButton("🚫 Ban", callback_data="adm_ban_help"), InlineKeyboardButton("✅ Unban", callback_data="adm_unban_help")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="adm_close")]
     ])
 
-    await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles Admin Menu clicks."""
+    """Handles all Admin clicks."""
     query = update.callback_query
-    if update.effective_user.id != ADMIN_ID: return
+    user_id = query.from_user.id
+    
+    if user_id != ADMIN_ID: 
+        await query.answer("🚫 Access Denied", show_alert=True)
+        return
+        
     await query.answer()
     data = query.data
     
+    # --- 1. CANCEL ---
     if data == "adm_close":
         await query.message.delete()
+        return ConversationHandler.END
         
+    elif data == "adm_back":
+        await admin_command(update, context)
+        return ConversationHandler.END
+
+    # --- 2. MAINTENANCE TOGGLE ---
+    elif data == "adm_maint_toggle":
+        # Check current state
+        current = get_settings().get("maintenance_mode", False)
+        # Flip it
+        new_state = not current
+        set_maintenance_mode(new_state)
+        
+        status_txt = "🔴 ENABLED" if new_state else "🟢 DISABLED"
+        await query.edit_message_text(
+            f"🛠 **MAINTENANCE UPDATED**\n"
+            f"New Status: **{status_txt}**",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]])
+        )
+
+    # --- 3. GEN CODE MENU ---
+    elif data == "adm_gift_menu":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("1 Day", callback_data="adm_gen_1"), InlineKeyboardButton("3 Days", callback_data="adm_gen_3")],
+            [InlineKeyboardButton("7 Days", callback_data="adm_gen_7"), InlineKeyboardButton("30 Days", callback_data="adm_gen_30")],
+            [InlineKeyboardButton("🔙 Back", callback_data="adm_back")]
+        ])
+        await query.edit_message_text("🎁 **SELECT DURATION**\nChoose gift validity:", reply_markup=kb)
+
+    # --- 3b. GEN CODE ACTION ---
+    elif data.startswith("adm_gen_"):
+        days = int(data.split("_")[2])
+        seconds = days * 24 * 3600
+        code = create_gift_code(f"Gift {days} Days", seconds)
+        
+        await query.edit_message_text(
+            f"✅ **CODE CREATED!**\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"🗝 Code: `{code}`\n"
+            f"⏳ Duration: {days} Days\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"User types: `/redeem {code}`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]])
+        )
+
+    # --- 4. BROADCAST ---
     elif data == "adm_broadcast":
         await query.edit_message_text(
             "📢 **BROADCAST MODE**\n\n"
-            "Send the message you want to broadcast to ALL users.\n"
-            "Type /cancel to abort."
+            "Reply with the message to send to ALL users.\n"
+            "Type /cancel to stop."
         )
         return ADMIN_BROADCAST_MSG
         
-    elif data == "adm_gift":
-        await query.edit_message_text("🎁 **Send Gift Duration (Days):**\nExample: `7` or `30`")
-        return ADMIN_GIFT_WAIT
-        
-    elif data == "adm_maint_on":
-        set_maintenance_mode(True)
-        await query.edit_message_text("🛑 **Maintenance Mode ENABLED.**\nUsers cannot start new sessions.")
-        
-    elif data == "adm_maint_off":
-        set_maintenance_mode(False)
-        await query.edit_message_text("🟢 **Maintenance Mode DISABLED.**")
-        
-    elif data == "adm_ban_help":
-        await query.edit_message_text(
-            "🚫 **BAN COMMANDS**\n\n"
-            "To Ban: `/ban 123456789`\n"
-            "To Unban: `/unban 123456789`",
-            parse_mode="Markdown"
-        )
-        
+    # --- 5. REF STATS ---
     elif data == "adm_ref_stats":
         await admin_referral_stats_command(update, context)
 
-# --- BROADCAST LOGIC (Restored) ---
+    # --- 6 & 7. BAN / UNBAN HELP ---
+    elif data == "adm_ban_help":
+        await query.edit_message_text(
+            "🚫 **HOW TO BAN**\n\n"
+            "Send this command in chat:\n"
+            "`/ban USER_ID`\n\n"
+            "Example: `/ban 123456789`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]])
+        )
+
+    elif data == "adm_unban_help":
+        await query.edit_message_text(
+            "✅ **HOW TO UNBAN**\n\n"
+            "Send this command in chat:\n"
+            "`/unban USER_ID`\n\n"
+            "Example: `/unban 123456789`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]])
+        )
+
+# --- LOGIC FUNCTIONS (Broadcast, Ban, Etc) ---
+
 async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This is handled via callback return above, but kept for direct entry safety
     return ADMIN_BROADCAST_MSG
 
 async def admin_send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends the actual broadcast to ALL users."""
     if update.effective_user.id != ADMIN_ID: return ConversationHandler.END
     
     msg_text = update.message.text
-    final_msg = f"📢 **OFFICIAL ANNOUNCEMENT**\n━━━━━━━━━━━━━━\n{msg_text}\n━━━━━━━━━━━━━━"
+    final_msg = f"📢 **ANNOUNCEMENT**\n━━━━━━━━━━━━━━\n{msg_text}"
     
-    status_msg = await update.message.reply_text("⏳ **Sending Broadcast...**")
+    status = await update.message.reply_text("⏳ **Sending...**")
+    count, blocked = 0, 0
     
-    count = 0
-    blocked = 0
-    users_cursor = get_all_user_ids()
-    
-    for user_doc in users_cursor:
+    for user in get_all_user_ids():
         try:
-            await context.bot.send_message(chat_id=user_doc['user_id'], text=final_msg, parse_mode="Markdown")
+            await context.bot.send_message(user['user_id'], final_msg, parse_mode="Markdown")
             count += 1
-            await asyncio.sleep(0.05) 
-        except:
-            blocked += 1
+            await asyncio.sleep(0.05)
+        except: blocked += 1
             
-    await status_msg.edit_text(f"✅ **Broadcast Complete.**\nSent: {count}\nFailed: {blocked}")
+    await status.edit_text(f"✅ **Sent:** {count}  ❌ **Blocked:** {blocked}")
     return ConversationHandler.END
 
 async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ **Action Cancelled.**")
+    await update.message.reply_text("❌ Cancelled.")
     return ConversationHandler.END
 
-# --- NEW TOOLS (Gift, Ban, Stats) ---
+# Legacy handlers to prevent import errors in main.py
 async def gift_generation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return ConversationHandler.END
-    try:
-        days = int(update.message.text)
-        seconds = days * 24 * 3600
-        code = create_gift_code("Gift Access", seconds)
-        await update.message.reply_text(f"🎁 **Code Generated:**\n`{code}`\n\nUser can redeem with `/redeem {code}`")
-    except:
-        await update.message.reply_text("❌ Invalid number. Try again or /cancel.")
-        return ADMIN_GIFT_WAIT
-    return ConversationHandler.END
+    return ConversationHandler.END 
 
 async def ban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     try:
-        target_id = int(context.args[0])
-        update_user_field(target_id, "is_banned", True)
-        await update.message.reply_text(f"🚫 User {target_id} **BANNED**.")
-    except:
-        await update.message.reply_text("Usage: /ban 123456789")
+        uid = int(context.args[0])
+        update_user_field(uid, "is_banned", True)
+        await update.message.reply_text(f"🚫 **Banned** User `{uid}`", parse_mode="Markdown")
+    except: await update.message.reply_text("Usage: /ban ID")
 
 async def unban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     try:
-        target_id = int(context.args[0])
-        update_user_field(target_id, "is_banned", False)
-        await update.message.reply_text(f"✅ User {target_id} **UNBANNED**.")
-    except:
-        await update.message.reply_text("Usage: /unban 123456789")
+        uid = int(context.args[0])
+        update_user_field(uid, "is_banned", False)
+        await update.message.reply_text(f"✅ **Unbanned** User `{uid}`", parse_mode="Markdown")
+    except: await update.message.reply_text("Usage: /unban ID")
 
 async def admin_referral_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
-    top_refs = get_top_referrers(limit=15)
-    msg = "🏆 **LEADERBOARD (Top Referrers)**\n\n"
-    if not top_refs: msg += "⚠️ No data available."
+    
+    refs = get_top_referrers(10)
+    txt = "🏆 **TOP REFERRERS**\n\n"
+    if not refs: txt += "No data found."
     else:
-        for i, user in enumerate(top_refs):
-            uid = user.get('user_id')
-            sales = user.get('referral_purchases', 0)
-            msg += f"#{i+1} 👤 `{uid}`  🔥 **{sales} Sales**\n"
+        for i, u in enumerate(refs):
+            txt += f"{i+1}. `{u['user_id']}` - {u.get('referral_purchases',0)} Sales\n"
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(msg, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(txt, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_back")]]))
     else:
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(txt, parse_mode="Markdown")
