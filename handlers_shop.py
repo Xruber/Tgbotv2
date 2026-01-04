@@ -1,3 +1,4 @@
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from database import get_user_data, update_user_field, increment_user_field, get_remaining_time_str
@@ -6,15 +7,23 @@ from datetime import datetime
 from target_engine import start_target_session, process_target_outcome
 from config import SELECTING_PLAN, WAITING_FOR_PAYMENT_PROOF, WAITING_FOR_UTR, TARGET_START_MENU, TARGET_SELECT_GAME, TARGET_GAME_LOOP
 
+logger = logging.getLogger(__name__)
+
 # --- SHOP MENUS ---
 async def packs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Main Shop Menu.
+    """
     kb = [
+        [InlineKeyboardButton("💎 VIP Subscriptions (1/7 Day)", callback_data="buy_plans_list")], # FIXED: Added Button
         [InlineKeyboardButton("🎯 Target Strategies", callback_data="shop_target")],
         [InlineKeyboardButton(f"🎲 Number Shot (₹{NUMBER_SHOT_PRICE})", callback_data=f"buy_{NUMBER_SHOT_KEY}")],
         [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_home")]
     ]
     msg = (
-        "🛒 **VIP SHOP**\n\n"
+        "🛒 **VIP SHOP**\n"
+        "━━━━━━━━━━━━━━\n"
+        "💎 **Subscriptions:** Unlock V5+ Engine & Live Signals.\n"
         "🎯 **Target Packs:** Specialized logic to turn small capital into big goals.\n"
         "🎲 **Number Shot:** High-risk AI for exact number prediction.\n"
     )
@@ -41,6 +50,9 @@ async def shop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- BUYING FLOW ---
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles plan selection and generating the Invoice.
+    """
     q = update.callback_query
     await q.answer()
     
@@ -48,7 +60,7 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     ud = get_user_data(uid)
 
-    # 1. Validation: Don't let them buy if they already have it active
+    # 1. Validation: Check ownership
     if key == NUMBER_SHOT_KEY and ud.get("has_number_shot"):
         await q.message.reply_text("✅ **You already own this.**", ephemeral=True)
         return ConversationHandler.END
@@ -61,45 +73,69 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await packs_command(update, context)
         return ConversationHandler.END
 
-    # 3. Show VIP Plans if generic "Shop" button clicked
-    if key == "": 
-        kb = [[InlineKeyboardButton(p["name"] + " - ₹" + p["price"], callback_data=f"buy_{k}")] for k, p in PREDICTION_PLANS.items()]
-        kb.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
+    # 3. Show Subscription Plans (If "💎 VIP Subscriptions" clicked)
+    if key == "plans_list": 
+        kb = []
+        # Sort plans (optional, but good for UI)
+        for k, p in PREDICTION_PLANS.items():
+            kb.append([InlineKeyboardButton(f"{p['name']} - {p['price']}", callback_data=f"buy_{k}")])
+        
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="shop_main")])
         await q.edit_message_text("💎 **SELECT VIP PLAN:**", reply_markup=InlineKeyboardMarkup(kb))
         return SELECTING_PLAN
 
-    # 4. Item Selection & Invoice
+    # 4. Item Selected -> GENERATE INVOICE
     context.user_data["buying_item"] = key
     
     if key in PREDICTION_PLANS:
         name, price = PREDICTION_PLANS[key]['name'], PREDICTION_PLANS[key]['price']
     elif key in TARGET_PACKS:
         name, price = TARGET_PACKS[key]['name'], TARGET_PACKS[key]['price']
-    else:
+    elif key == NUMBER_SHOT_KEY:
         name, price = "Number Shot", NUMBER_SHOT_PRICE
+    else:
+        # Fallback for unknown keys
+        await q.message.reply_text("❌ Error: Item not found.")
+        return ConversationHandler.END
 
     caption = (
         f"🧾 **DIGITAL INVOICE**\n"
         f"━━━━━━━━━━━━━━\n"
         f"🛍 **Item:** {name}\n"
-        f"💰 **Total:** ₹{price}\n"
+        f"💰 **Total:** {price}\n"
         f"📅 **Date:** {datetime.now().strftime('%Y-%m-%d')}\n"
         f"━━━━━━━━━━━━━━\n"
-        f"1. Scan QR -> Pay\n2. Click 'Paid'\n3. Send UTR Number"
+        f"1. Scan QR to Pay\n2. Click 'Paid'\n3. Send UTR Number"
     )
     
+    # Delete the menu message to clean up chat
     try: await q.message.delete()
     except: pass
     
-    await context.bot.send_photo(
-        chat_id=uid,
-        photo=PAYMENT_IMAGE_URL, 
-        caption=caption, 
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ I Have Paid", callback_data="sent")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="back_home")]
-        ])
-    )
+    # PAY BUTTONS
+    kb_invoice = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ I Have Paid", callback_data="sent")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_home")]
+    ])
+
+    # 5. ATTEMPT TO SEND PHOTO (With Fallback)
+    try:
+        await context.bot.send_photo(
+            chat_id=uid,
+            photo=PAYMENT_IMAGE_URL, 
+            caption=caption, 
+            reply_markup=kb_invoice
+        )
+    except Exception as e:
+        logger.error(f"Failed to send Payment Photo: {e}")
+        # FALLBACK: Send TEXT ONLY if image fails
+        await context.bot.send_message(
+            chat_id=uid,
+            text=f"⚠️ *Image Load Failed*\n\n{caption}\n\n(Pay to Admin UPI manually)",
+            reply_markup=kb_invoice,
+            parse_mode="Markdown"
+        )
+        
     return WAITING_FOR_PAYMENT_PROOF
 
 async def confirm_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -118,15 +154,19 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InlineKeyboardButton("Approve", callback_data=f"adm_ok_{uid}_{item}"),
         InlineKeyboardButton("Reject", callback_data=f"adm_no_{uid}")
     ]])
-    await context.bot.send_message(
-        ADMIN_ID, 
-        f"💳 **PAYMENT VERIFICATION**\n━━━━━━━━━━━━━━\n👤 ID: `{uid}`\n🛍 Item: `{item}`\n🔢 UTR: `{utr}`\n━━━━━━━━━━━━━━", 
-        reply_markup=kb, 
-        parse_mode="Markdown"
-    )
     
+    try:
+        await context.bot.send_message(
+            ADMIN_ID, 
+            f"💳 **PAYMENT VERIFICATION**\n━━━━━━━━━━━━━━\n👤 ID: `{uid}`\n🛍 Item: `{item}`\n🔢 UTR: `{utr}`\n━━━━━━━━━━━━━━", 
+            reply_markup=kb, 
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Failed to send to admin: {e}")
+
     await update.message.reply_text(
-        "✅ **Verification Pending.**\n\nYour request has been sent to the Admin.\nYou will be notified automatically once approved (approx 10-30 mins).",
+        "✅ **Verification Pending.**\n\nYour request has been sent to the Admin.\nYou will be notified automatically once approved.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Return Home", callback_data="back_home")]])
     )
     return ConversationHandler.END
@@ -138,53 +178,55 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action, uid = parts[1], int(parts[2])
     
     if action == "ok":
-        # Extract item key (might contain underscores, so join the rest)
         item_key = "_".join(parts[3:])
-        
         await grant_access(uid, item_key, context)
         
-        # Referral Logic: Credit the referrer
+        # Referral Logic
         ref = get_user_data(uid).get("referred_by")
         if ref: increment_user_field(ref, "referral_purchases", 1)
         
         await q.edit_message_text(f"✅ **Approved for User {uid}.**")
     else:
-        # Reject
-        await context.bot.send_message(uid, "❌ **Payment Rejected.**\nInvalid Transaction ID or Payment not received.")
+        try:
+            await context.bot.send_message(uid, "❌ **Payment Rejected.**\nInvalid Transaction ID or Payment not received.")
+        except: pass
         await q.edit_message_text(f"🚫 **Rejected User {uid}.**")
 
 async def grant_access(user_id, item_key, context):
     """Activates the plan/pack for the user."""
-    if item_key in PREDICTION_PLANS:
-        plan = PREDICTION_PLANS[item_key]
-        expiry = __import__("time").time() + plan["duration_seconds"]
-        update_user_field(user_id, "prediction_status", "ACTIVE")
-        update_user_field(user_id, "expiry_timestamp", int(expiry))
-        
-        await context.bot.send_message(
-            user_id, 
-            f"🎉 **PREMIUM ACTIVATED!** 🎉\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"💎 **Plan:** {plan['name']}\n"
-            f"⏳ **Expires:** {get_remaining_time_str(get_user_data(user_id))}\n"
-            f"🚀 Click 'Start Prediction' to win!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start", callback_data="back_home")]])
-        )
-        
-    elif item_key == NUMBER_SHOT_KEY:
-        update_user_field(user_id, "has_number_shot", True)
-        await context.bot.send_message(user_id, "🎲 **NUMBER SHOT UNLOCKED!** 🎲\nYou can now see exact number predictions.")
+    try:
+        if item_key in PREDICTION_PLANS:
+            plan = PREDICTION_PLANS[item_key]
+            expiry = __import__("time").time() + plan["duration_seconds"]
+            update_user_field(user_id, "prediction_status", "ACTIVE")
+            update_user_field(user_id, "expiry_timestamp", int(expiry))
+            
+            await context.bot.send_message(
+                user_id, 
+                f"🎉 **PREMIUM ACTIVATED!** 🎉\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💎 **Plan:** {plan['name']}\n"
+                f"⏳ **Expires:** {get_remaining_time_str(get_user_data(user_id))}\n"
+                f"🚀 Click 'Start Prediction' to win!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start", callback_data="back_home")]])
+            )
+            
+        elif item_key == NUMBER_SHOT_KEY:
+            update_user_field(user_id, "has_number_shot", True)
+            await context.bot.send_message(user_id, "🎲 **NUMBER SHOT UNLOCKED!** 🎲\nYou can now see exact number predictions.")
 
-    elif item_key in TARGET_PACKS:
-        update_user_field(user_id, "target_access", item_key)
-        pack = TARGET_PACKS[item_key]
-        await context.bot.send_message(
-            user_id, 
-            f"🎯 **TARGET SESSION READY** 🎯\n"
-            f"📦 **Pack:** {pack['name']}\n"
-            f"🏁 **Goal:** {pack['target']}\n"
-            f"🚀 Type /target to begin."
-        )
+        elif item_key in TARGET_PACKS:
+            update_user_field(user_id, "target_access", item_key)
+            pack = TARGET_PACKS[item_key]
+            await context.bot.send_message(
+                user_id, 
+                f"🎯 **TARGET SESSION READY** 🎯\n"
+                f"📦 **Pack:** {pack['name']}\n"
+                f"🏁 **Goal:** {pack['target']}\n"
+                f"🚀 Type /target to begin."
+            )
+    except Exception as e:
+        logger.error(f"Error granting access: {e}")
 
 # --- TARGET COMMANDS ---
 async def target_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
