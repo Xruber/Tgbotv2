@@ -11,13 +11,11 @@ from handlers_utils import check_status, get_text, display_main_menu, draw_bar
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ud = get_user_data(user_id)
-    
     if context.args and not ud.get("referred_by"):
         try:
             ref_id = int(context.args[0])
             if ref_id != user_id: update_user_field(user_id, "referred_by", ref_id)
         except: pass
-
     if not ud.get("language"):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en"), 
@@ -42,7 +40,6 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Resets language preference."""
     update_user_field(update.effective_user.id, "language", None)
     return await start_command(update, context)
 
@@ -52,32 +49,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     uid = update.effective_user.id
     ud = get_user_data(uid)
-    
     wins = ud.get("total_wins", 0)
     losses = ud.get("total_losses", 0)
     total = wins + losses
     rate = (wins/total) if total > 0 else 0.0
-    
-    rank = "🛠 Grinder"
-    if total > 10:
-        if rate > 0.8: rank = "🎯 Sniper"
-        elif rate > 0.6: rank = "💼 Pro"
-    
     rate_bar = draw_bar(rate, 10, "blocks")
-    
-    msg = (
-        f"👤 **PLAYER PROFILE**\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"🏆 **Rank:** {rank}\n"
-        f"🆔 ID: `{uid}`\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"📊 **PERFORMANCE:**\n"
-        f"✅ Wins: {wins}\n"
-        f"❌ Losses: {losses}\n"
-        f"📉 Win Rate: {int(rate*100)}%\n{rate_bar}\n"
-    )
+    msg = f"👤 **PROFILE**\nID: `{uid}`\n✅ Wins: {wins}\n❌ Losses: {losses}\n📉 Rate: {int(rate*100)}%\n{rate_bar}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="nav_home")]])
-    
     if update.callback_query: await update.callback_query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
     else: await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
     return MAIN_MENU
@@ -85,19 +63,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @check_status
 async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    ud = get_user_data(uid)
     link = f"https://t.me/{context.bot.username}?start={uid}"
-    sales = ud.get("referral_purchases", 0)
-    
-    msg = (
-        f"🤝 **AFFILIATE PROGRAM**\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"🔗 **Your Link:**\n`{link}`\n\n"
-        f"💰 **Stats:**\n"
-        f"👥 Sales: {sales}\n"
-        f"💵 Earned: ₹{sales*100}\n"
-        f"━━━━━━━━━━━━━━"
-    )
+    sales = get_user_data(uid).get("referral_purchases", 0)
+    msg = f"🤝 **AFFILIATE**\n🔗 `{link}`\n💰 Sales: {sales}\n💵 Earned: ₹{sales*100}"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,7 +74,7 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_user_field(uid, "total_losses", 0)
     await update.message.reply_text("🔄 **Stats Reset.**")
 
-# --- REDEEM ---
+# --- REDEEM & ADMIN ---
 @check_status
 async def redeem_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
@@ -123,7 +91,6 @@ async def redeem_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Invalid.")
     return REDEEM_PROCESS
 
-# --- ADMIN FUNCTIONS ---
 @check_status
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
@@ -137,9 +104,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
-    
     if "adm_ok_" in data:
-        # PAYMENT APPROVAL + REF CREDIT
         parts = data.split("_")
         uid, item = int(parts[2]), "_".join(parts[3:])
         if item == NUMBER_SHOT_KEY: update_user_field(uid, "has_number_shot", True)
@@ -148,19 +113,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             expiry = time.time() + PREDICTION_PLANS[item]['duration_seconds']
             update_user_field(uid, "prediction_status", "ACTIVE")
             update_user_field(uid, "expiry_timestamp", expiry)
-        
-        # Credit Referrer
         ref = get_user_data(uid).get("referred_by")
         if ref: increment_user_field(ref, "referral_purchases", 1)
-            
         await context.bot.send_message(uid, f"✅ **Activated:** {item}")
         await q.edit_message_text("✅ Approved")
-
     elif "adm_maint" in data:
         curr = is_maintenance_mode()
         set_maintenance_mode(not curr)
         await q.answer(f"Maintenance: {not curr}")
-        
     elif "adm_gen" in data:
         code = create_gift_code("1_day")
         await q.message.reply_text(f"🎁 Code: `{code}`")
@@ -168,7 +128,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_referral_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     top = get_top_referrers(15)
-    msg = "🏆 **TOP REFERRERS**\n\n" + "\n".join([f"#{i+1} `{u['user_id']}`: {u.get('referral_purchases',0)} Sales" for i, u in enumerate(top)])
+    msg = "🏆 **LEADERBOARD**\n\n" + "\n".join([f"#{i+1} `{u['user_id']}`: {u.get('referral_purchases',0)} Sales" for i, u in enumerate(top)])
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -178,7 +138,6 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Banned.")
     except: pass
 
-# --- BROADCAST ---
 async def admin_broadcast_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
