@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import *
 from database import *
 from api_helper import get_game_data, check_result_exists
-from prediction_engine import get_v5_logic, get_bet_unit
+from prediction_engine import get_v5_logic
 from target_engine import start_target_session, process_target_outcome
 from handlers_utils import check_status, check_subscription, display_main_menu, draw_bar
 
@@ -39,11 +39,11 @@ async def prediction_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("⚠️ API Error", show_alert=True)
             return PREDICTION_LOOP
             
-        # V5 Logic Only (Switching Removed per request)
+        # Default V5 Engine
         pred, logic, _ = get_v5_logic(period, gtype, history)
         context.user_data["current_period"] = period
         
-        # Number Shot
+        # Number Shot Logic
         ud = get_user_data(uid)
         shot_txt = ""
         if ud.get("has_number_shot"):
@@ -55,10 +55,9 @@ async def prediction_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if history:
             for h in history[-6:]: trend_viz += "🔴" if h['o'] == "Big" else "🟢"
 
-        # Risk Bar (Based on user level if needed, or static)
-        risk_bar = draw_bar(0.2, 8, "risk") # Static low risk for V5
-
+        risk_bar = draw_bar(0.2, 8, "risk")
         color = "🔴" if pred == "Big" else "🟢"
+        
         msg = (
             f"🎮 **WINGO {gtype}**\n"
             f"━━━━━━━━━━━━━━\n"
@@ -183,7 +182,7 @@ async def shop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb.append([InlineKeyboardButton(f"🎲 Number Shot ({NUMBER_SHOT_PRICE})", callback_data=f"buy_{NUMBER_SHOT_KEY}")])
     kb.append([InlineKeyboardButton("🔙 Back", callback_data="nav_home")])
     
-    await q.edit_message_text("🛒 **VIP STORE**", reply_markup=InlineKeyboardMarkup(kb))
+    await q.edit_message_text("🛒 **VIP STORE**\nSelect an Item:", reply_markup=InlineKeyboardMarkup(kb))
     return SHOP_MENU
 
 @check_status
