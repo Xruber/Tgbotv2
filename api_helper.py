@@ -1,65 +1,80 @@
-import requests
+import aiohttp
 import time
 import logging
+import asyncio
 
-# Configuration
+logger = logging.getLogger(__name__)
+
+# Game API Endpoints
+URLS = {
+    "30s": {
+        "current": "https://draw.ar-lottery01.com/WinGo/WinGo_30S.json",
+        "history": "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+    },
+    "1m": {
+        "current": "https://draw.ar-lottery01.com/WinGo/WinGo_1M.json",
+        "history": "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
+    }
+}
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
     "Referer": "https://www.92lottery.com/"
 }
 
-URLS = {
-    "30s": "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json",
-    "1m": "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
-}
+async def fetch_json(session, url, params=None):
+    """Async helper to fetch JSON with timeout."""
+    try:
+        async with session.get(url, headers=HEADERS, params=params, timeout=5) as response:
+            if response.status == 200:
+                return await response.json()
+    except Exception as e:
+        logger.error(f"API Request Failed: {e}")
+    return None
 
-def get_game_data(game_type="30s"):
+async def get_game_data(game_type="30s"):
     """
-    Fetches the API data.
-    Returns: (Current_Period_String, History_List)
+    Fetches Current Period and History Asynchronously.
     """
-    url = URLS.get(game_type, URLS["30s"])
+    type_urls = URLS.get(game_type, URLS["30s"])
     timestamp = int(time.time() * 1000)
     
-    try:
-        response = requests.get(f"{url}?ts={timestamp}&page=1&size=10", headers=HEADERS, timeout=5)
-        data = response.json()
+    async with aiohttp.ClientSession() as session:
+        # 1. Fetch History (Most Reliable)
+        hist_data = await fetch_json(session, type_urls['history'], params={"ts": timestamp, "page": 1, "size": 10})
         
-        raw_list = data.get('data', {}).get('list', [])
+        if not hist_data:
+            return None, []
+
         clean_history = []
+        raw_list = hist_data.get('data', {}).get('list', [])
         
         for item in raw_list:
             period = str(item['issueNumber'])
-            number = int(item['number'])
-            outcome = "Big" if number >= 5 else "Small"
-            clean_history.append({'p': period, 'r': number, 'o': outcome})
+            result_num = int(item['number'])
+            outcome = "Small" if result_num <= 4 else "Big"
+            clean_history.append({'p': period, 'r': result_num, 'o': outcome})
             
         if not clean_history:
             return None, []
             
-        # Sort: Oldest -> Newest (History[-1] is the most recent result)
-        clean_history.reverse()
+        clean_history.reverse() # Oldest to Newest
         
-        # Calculate Current Period (Last Result + 1)
-        last_period = int(clean_history[-1]['p'])
-        current_period = str(last_period + 1)
-        
+        # 2. Calculate Current Period from History
+        last_issue = int(clean_history[-1]['p'])
+        current_period = str(last_issue + 1)
+
         return current_period, clean_history
 
-    except Exception as e:
-        print(f"API Error: {e}")
-        return None, []
-
-def check_result_exists(game_type, target_period):
+async def check_result_exists(game_type, target_period):
     """
-    Checks if the result for a specific period has been published.
-    Returns: (True/False, Outcome)
+    Checks if result exists for period (Async).
     """
-    current, history = get_game_data(game_type)
+    _, history = await get_game_data(game_type)
     if not history: return False, None
     
     for item in history:
         if str(item['p']) == str(target_period):
-            return True, item['o']
+            return True, item['o'] # Found result
             
     return False, None
