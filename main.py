@@ -116,23 +116,27 @@ async def redeem_command(update: Update, context):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # 1. COMMANDS (Added missing ones)
+    # 1. COMMANDS
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", admin_command)) 
     app.add_handler(CommandHandler("redeem", redeem_command))
     app.add_handler(CommandHandler("ban", ban_user_command))
     app.add_handler(CommandHandler("unban", unban_user_command))
-    app.add_handler(CommandHandler("stats", stats_command)) # FIXED
-    app.add_handler(CommandHandler("packs", packs_command)) # FIXED
-    app.add_handler(CommandHandler("invite", invite_command)) # FIXED
-    app.add_handler(CommandHandler("reset", reset_command)) # FIXED
+    app.add_handler(CommandHandler("stats", stats_command)) 
+    app.add_handler(CommandHandler("packs", packs_command))
+    app.add_handler(CommandHandler("invite", invite_command))
+    app.add_handler(CommandHandler("reset", reset_command))
     
     # 2. LANG & NAV
     app.add_handler(CallbackQueryHandler(set_language, pattern="^lang_"))
     app.add_handler(CallbackQueryHandler(back_home_handler, pattern="^back_home$"))
     app.add_handler(CallbackQueryHandler(redeem_hint, pattern="^btn_redeem_hint$"))
+    
+    # 3. GLOBAL CALLBACKS (CRITICAL: REGISTER ADMIN ACTION FIRST)
+    # This handles the Approve/Reject buttons
+    app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) 
 
-    # 3. CONVERSATION HANDLERS
+    # 4. CONVERSATION HANDLERS
     admin_h = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_callback, pattern="^adm_")],
         states={
@@ -182,12 +186,11 @@ def main():
     )
     app.add_handler(target_h)
 
-    # 4. GLOBAL CALLBACKS
-    app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) 
+    # 5. REMAINING GLOBAL CALLBACKS
     app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats")) 
     app.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_"))
 
-    print("🤖 Bot Online (All Fixes Applied)")
+    print("🤖 Bot Online (Admin Fix + Pay Block)")
     app.run_polling()
 
 if __name__ == "__main__":
