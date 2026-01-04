@@ -73,9 +73,16 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, redeem_process)
             ]
         },
+        # 🔥 CRITICAL FIX: All commands in fallbacks work INSTANTLY in any menu
         fallbacks=[
             CommandHandler("start", start_command), 
-            CommandHandler("cancel", cancel)
+            CommandHandler("cancel", cancel),
+            CommandHandler("packs", packs_command),
+            CommandHandler("target", target_command),
+            CommandHandler("language", language_command),
+            CommandHandler("stats", stats_command),
+            CommandHandler("invite", invite_command),
+            CommandHandler("admin", admin_panel)
         ]
     )
     
@@ -90,7 +97,7 @@ def main():
     app.add_handler(broadcast_conv)
     app.add_handler(main_conv)
     
-    # Global Commands
+    # Global Command Registration (for when not in conversation)
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("invite", invite_command))
     app.add_handler(CommandHandler("packs", packs_command))
