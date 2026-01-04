@@ -32,14 +32,9 @@ async def set_language(update: Update, context):
     lang = q.data.split("_")[1]
     update_user_field(q.from_user.id, "language", lang)
     await q.answer(f"Language set to {lang}")
-    # Edit the language message directly into the Main Menu
     await start_command(update, context, edit_mode=True)
 
 async def start_command(update: Update, context, edit_mode=False):
-    """
-    The Main Dashboard. 
-    edit_mode=True means we edit the existing message (smoother).
-    """
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
     
@@ -67,11 +62,10 @@ async def start_command(update: Update, context, edit_mode=False):
         else: await update.message.reply_text(txt, reply_markup=kb)
         return ConversationHandler.END
 
-    # --- MAIN DASHBOARD UI ---
+    # --- DASHBOARD ---
     lang = user_data.get("language", "EN")
     txt = LANGUAGES.get(lang, LANGUAGES["EN"])
     
-    # Check Subscription Status for Badge
     sub_status = "💎 VIP Active" if is_subscription_active(user_data) else "🆓 Free Plan"
     
     msg = (
@@ -84,16 +78,14 @@ async def start_command(update: Update, context, edit_mode=False):
         f"🔥 **Choose an Option:**"
     )
     
-    # NEW ATTRACTIVE LAYOUT
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Start Prediction", callback_data="select_game_type")],
-        [InlineKeyboardButton("🎯 Target Mode", callback_data="shop_target")], # Direct to Target Menu
+        [InlineKeyboardButton("🎯 Target Mode", callback_data="shop_target")],
         [InlineKeyboardButton("🛒 VIP Shop", callback_data="shop_main"), InlineKeyboardButton("👤 My Profile", callback_data="my_stats")],
         [InlineKeyboardButton("🎁 Redeem Code", callback_data="btn_redeem_hint"), InlineKeyboardButton("💬 Support", url="https://t.me/your_support_handle")]
     ])
     
     if update.callback_query:
-        # If triggered by "Back" button, we edit.
         await update.callback_query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
     else:
         await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
@@ -101,45 +93,46 @@ async def start_command(update: Update, context, edit_mode=False):
     return ConversationHandler.END
 
 async def back_home_handler(update: Update, context):
-    """Universal Back Button Handler."""
     await start_command(update, context, edit_mode=True)
     return ConversationHandler.END
 
 async def redeem_hint(update: Update, context):
-    """Popup to tell user how to redeem."""
     await update.callback_query.answer("💡 Type /redeem CODE to use a gift code!", show_alert=True)
 
 async def redeem_command(update: Update, context):
-    """The actual command: /redeem G-12345"""
     user_id = update.effective_user.id
     try:
         code = context.args[0]
     except IndexError:
-        await update.message.reply_text("❌ **Usage:** `/redeem CODE`\nExample: `/redeem GIFT-12345`", parse_mode="Markdown")
+        await update.message.reply_text("❌ **Usage:** `/redeem CODE`")
         return
 
     success, plan_name = redeem_gift_code(code, user_id)
     if success:
-        await update.message.reply_text(f"🎉 **SUCCESS!**\n\n💎 **Plan Activated:** {plan_name}\n🚀 You can now use the bot!", parse_mode="Markdown")
+        await update.message.reply_text(f"🎉 **SUCCESS!**\n\n💎 **Plan Activated:** {plan_name}")
     else:
         await update.message.reply_text("❌ **Invalid or Expired Code.**")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # 1. SIMPLE COMMANDS
+    # 1. COMMANDS (Added missing ones)
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("admin", admin_command)) # Ensure ADMIN_ID in config.py is correct!
+    app.add_handler(CommandHandler("admin", admin_command)) 
     app.add_handler(CommandHandler("redeem", redeem_command))
     app.add_handler(CommandHandler("ban", ban_user_command))
     app.add_handler(CommandHandler("unban", unban_user_command))
+    app.add_handler(CommandHandler("stats", stats_command)) # FIXED
+    app.add_handler(CommandHandler("packs", packs_command)) # FIXED
+    app.add_handler(CommandHandler("invite", invite_command)) # FIXED
+    app.add_handler(CommandHandler("reset", reset_command)) # FIXED
     
     # 2. LANG & NAV
     app.add_handler(CallbackQueryHandler(set_language, pattern="^lang_"))
     app.add_handler(CallbackQueryHandler(back_home_handler, pattern="^back_home$"))
     app.add_handler(CallbackQueryHandler(redeem_hint, pattern="^btn_redeem_hint$"))
 
-    # 3. ADMIN CONVERSATION
+    # 3. CONVERSATION HANDLERS
     admin_h = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_callback, pattern="^adm_")],
         states={
@@ -151,7 +144,6 @@ def main():
     )
     app.add_handler(admin_h)
 
-    # 4. GAME CONVERSATION (Prediction)
     pred_h = ConversationHandler(
         entry_points=[CallbackQueryHandler(select_game_type, pattern="^select_game_type$")],
         states={
@@ -163,11 +155,10 @@ def main():
     )
     app.add_handler(pred_h)
     
-    # 5. SHOP CONVERSATION
     buy_h = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(shop_callback, pattern="^shop_"), # Main Shop Entry
-            CallbackQueryHandler(start_buy, pattern="^buy_")       # Direct Buy Trigger
+            CallbackQueryHandler(shop_callback, pattern="^shop_"),
+            CallbackQueryHandler(start_buy, pattern="^buy_")
         ],
         states={
             SELECTING_PLAN: [CallbackQueryHandler(start_buy, pattern="^buy_")],
@@ -179,7 +170,6 @@ def main():
     )
     app.add_handler(buy_h)
 
-    # 6. TARGET CONVERSATION
     target_h = ConversationHandler(
         entry_points=[CommandHandler("target", target_command), CallbackQueryHandler(target_command, pattern="^shop_target$")],
         states={
@@ -192,11 +182,12 @@ def main():
     )
     app.add_handler(target_h)
 
-    # 7. EXTRAS
-    app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) # Payment Approval
-    app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats")) # Profile
+    # 4. GLOBAL CALLBACKS
+    app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) 
+    app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats")) 
+    app.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_"))
 
-    print("🤖 Bot Online (Dashboard Fixed + Payment Fix + Admin Fix)")
+    print("🤖 Bot Online (All Fixes Applied)")
     app.run_polling()
 
 if __name__ == "__main__":
