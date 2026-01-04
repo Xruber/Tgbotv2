@@ -9,62 +9,71 @@ MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGO_URI_HERE")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
 
 # --- Constants ---
-SUPPORT_USERNAME = "YourSupport" 
-PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433268868255580262/Screenshot_20251029-1135273.png"
+REGISTER_LINK = "https://t.me/+pR0EE-BzatNjZjNl" 
+PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/888361275464220733/1451949298928455831/Screenshot_20251029-1135273.png"
 
-# --- Plans ---
-PREDICTION_PLANS = {
-    "1_day": {"name": "1 Day Trial", "price": "100₹", "duration_seconds": 86400},
-    "7_day": {"name": "7 Day VIP", "price": "300₹", "duration_seconds": 604800},
-    "permanent": {"name": "Lifetime Access", "price": "500₹", "duration_seconds": 3153600000},
-}
-
-# --- Target & Special Packs ---
-NUMBER_SHOT_PRICE = "100₹"
-NUMBER_SHOT_KEY = "number_shot"
-
-TARGET_PACKS = {
-    "target_2k": {"name": "Target: 1K ➔ 2K", "price": "200₹", "target": 2000, "start": 1000},
-    "target_5k": {"name": "Target: 1K ➔ 5K", "price": "500₹", "target": 5000, "start": 1000},
-}
-
-# --- Game Logic ---
-BETTING_SEQUENCE = [1, 2, 4, 8, 16, 32, 64] 
-MAX_LEVEL = len(BETTING_SEQUENCE)
-
-# --- States ---
-# Added ADMIN_BROADCAST_MSG to the end
-(LANGUAGE_SELECT, MAIN_MENU, PREDICTION_LOOP, SHOP_MENU, 
- WAITING_UTR, REDEEM_PROCESS, TARGET_MENU, TARGET_LOOP, ADMIN_BROADCAST_MSG) = range(9)
-
-# --- Texts ---
-TEXTS = {
-    "en": {
-        "welcome": "👋 **Welcome!**\nSelect Language:",
-        "main_menu": "🏠 **DASHBOARD**",
-        "banned": "🚫 **ACCESS DENIED**\nYou have been banned.",
-        "maintenance": "🛠 **MAINTENANCE**\nBot is currently updating.",
-        "trial_ended": "🔒 **Trial Expired**",
-        "plan_active": "💎 **VIP Active**",
-        "btn_pred": "🚀 Start Prediction",
-        "btn_target": "🎯 Target Session",
-        "btn_shop": "🛒 Store",
-        "btn_profile": "👤 My Stats",
-        "btn_redeem": "🎁 Redeem",
-        "wait_result": "⏳ Wait for result..."
+# --- Localization ---
+LANGUAGES = {
+    "EN": {
+        "welcome": "👋 Hello, **{name}**!",
+        "select_lang": "🌍 **Select Language / भाषा चुनें:**",
+        "maintenance": "🚧 **System under maintenance.** Please wait.",
+        "banned": "🚫 **You are banned from using this bot.**",
+        "result_wait": "⏳ **Result not yet released.**\nPlease wait 10-20 seconds.",
+        "win_msg": "💰 **WIN CONFIRMED!**\nResult: {result}",
+        "loss_msg": "📉 **LOSS CONFIRMED.**\nResult: {result}",
+        "wait_next": "➡️ **Please wait for the next period...**"
     },
-    "hi": {
-        "welcome": "👋 **स्वागत है!**\nभाषा चुनें:",
-        "main_menu": "🏠 **डैशबोर्ड**",
-        "banned": "🚫 **प्रतिबंधित**\nआपको बैन कर दिया गया है।",
-        "maintenance": "🛠 **रखरखाव**\nबॉट अपडेट हो रहा है।",
-        "trial_ended": "🔒 **ट्रायल समाप्त**",
-        "plan_active": "💎 **VIP सक्रिय**",
-        "btn_pred": "🚀 भविष्यवाणी",
-        "btn_target": "🎯 टारगेट सेशन",
-        "btn_shop": "🛒 स्टोर",
-        "btn_profile": "👤 प्रोफाइल",
-        "btn_redeem": "🎁 रिडीम",
-        "wait_result": "⏳ परिणाम का इंतजार करें..."
+    "HI": {
+        "welcome": "👋 नमस्ते, **{name}**!",
+        "select_lang": "🌍 **भाषा चुनें:**",
+        "maintenance": "🚧 **सिस्टम रखरखाव (Maintenance) के तहत है।**",
+        "banned": "🚫 **आपको प्रतिबंधित कर दिया गया है।**",
+        "result_wait": "⏳ **परिणाम अभी नहीं आया है।**\nकृपया 10-20 सेकंड प्रतीक्षा करें।",
+        "win_msg": "💰 **जीत पक्की! (WIN)**\nपरिणाम: {result}",
+        "loss_msg": "📉 **हार (LOSS).**\nपरिणाम: {result}",
+        "wait_next": "➡️ **अगले पीरियड का इंतज़ार करें...**"
     }
 }
+
+# --- Subscription Plans ---
+PREDICTION_PLANS = {
+    "7_day": {"name": "7 Day Access", "price": "300₹", "duration_seconds": 604800},
+    "permanent": {"name": "Permanent Access", "price": "500₹", "duration_seconds": 1576800000},
+}
+
+# --- Packs & Target ---
+NUMBER_SHOT_PRICE = "100₹"
+NUMBER_SHOT_KEY = "number_shot_pack"
+
+TARGET_PACKS = {
+    "target_2k": {"name": "1K - 2K Target", "price": "200₹", "target": 2000, "start": 1000},
+    "target_3k": {"name": "1K - 3K Target", "price": "300₹", "target": 3000, "start": 1000},
+    "target_4k": {"name": "1K - 4K Target", "price": "400₹", "target": 4000, "start": 1000},
+    "target_5k": {"name": "1K - 5K Target", "price": "500₹", "target": 5000, "start": 1000},
+}
+
+# --- Game Logic Constants ---
+BETTING_SEQUENCE = [1, 2, 4, 8, 16, 32] 
+MAX_LEVEL = len(BETTING_SEQUENCE)
+MAX_HISTORY_LENGTH = 12 
+PATTERN_LENGTH = 4
+V5_SALT = "ar-lottery-v5-plus"
+
+ALL_PATTERNS = [
+    (['Big', 'Big', 'Big', 'Big'], "BBBB"),
+    (['Small', 'Small', 'Small', 'Small'], "SSSS"),
+    (['Big', 'Big', 'Small', 'Small'], "BBSS"),
+    (['Small', 'Small', 'Big', 'Big'], "SSBB"),
+    (['Big', 'Small', 'Big', 'Small'], "BSBS"),
+    (['Small', 'Big', 'Small', 'Big'], "SBSB"),
+    (['Small', 'Big', 'Big', 'Small'], "SBBS"),
+    (['Big', 'Small', 'Small', 'Big'], "BSSB"),
+]
+
+# --- SHARED STATES ---
+(SELECTING_PLAN, WAITING_FOR_PAYMENT_PROOF, WAITING_FOR_UTR, 
+ SELECTING_GAME_TYPE, WAITING_FOR_FEEDBACK, 
+ TARGET_START_MENU, TARGET_SELECT_GAME, TARGET_GAME_LOOP,
+ ADMIN_BROADCAST_MSG, SURESHOT_MENU, SURESHOT_LOOP,
+ ADMIN_GIFT_WAIT) = range(12)
