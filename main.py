@@ -2,16 +2,14 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 
-# Import Config
+# Import Config & DB
 from config import (
-    BOT_TOKEN, SELECTING_GAME_TYPE, WAITING_FOR_FEEDBACK, 
+    BOT_TOKEN, ADMIN_ID, SELECTING_GAME_TYPE, WAITING_FOR_FEEDBACK, 
     SELECTING_PLAN, WAITING_FOR_PAYMENT_PROOF, WAITING_FOR_UTR, 
     TARGET_START_MENU, TARGET_SELECT_GAME, TARGET_GAME_LOOP, 
     SURESHOT_MENU, SURESHOT_LOOP, ADMIN_BROADCAST_MSG, 
     ADMIN_GIFT_WAIT, LANGUAGES
 )
-
-# Import Database
 from database import (
     get_user_data, update_user_field, is_subscription_active, 
     get_settings, redeem_gift_code
@@ -22,36 +20,41 @@ from handlers_users import stats_command, switch_command, set_mode, reset_comman
 from handlers_game import select_game_type, start_game_flow, handle_feedback
 from handlers_shop import packs_command, shop_callback, start_buy, confirm_sent, receive_utr, admin_action, target_command, target_resume, start_target_game, target_loop
 from handlers_sureshot import sureshot_command, sureshot_start, sureshot_refresh, sureshot_outcome
-
-# --- CORRECTED IMPORT BLOCK FOR ADMIN ---
 from handlers_admin import (
     admin_command, admin_callback, admin_broadcast_entry, 
     admin_send_broadcast, cancel_broadcast, admin_referral_stats_command, 
     ban_user_command, unban_user_command, gift_generation
 )
 
-# --- LANGUAGE SELECTOR ---
+# --- LANGUAGE & STARTUP ---
 async def set_language(update: Update, context):
     q = update.callback_query
     lang = q.data.split("_")[1]
     update_user_field(q.from_user.id, "language", lang)
     await q.answer(f"Language set to {lang}")
-    await start_command(update, context)
+    # Edit the language message directly into the Main Menu
+    await start_command(update, context, edit_mode=True)
 
-# --- START ---
-async def start_command(update: Update, context):
+async def start_command(update: Update, context, edit_mode=False):
+    """
+    The Main Dashboard. 
+    edit_mode=True means we edit the existing message (smoother).
+    """
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
     
     # 1. Ban Check
     if user_data.get("is_banned"):
-        await update.message.reply_text(LANGUAGES.get("EN")["banned"])
+        txt = LANGUAGES.get("EN")["banned"]
+        if update.callback_query: await update.callback_query.edit_message_text(txt)
+        else: await update.message.reply_text(txt)
         return ConversationHandler.END
 
-    # 2. Maintenance Check (Skip for Admin)
-    # REPLACE 123456789 WITH YOUR REAL ADMIN ID
-    if get_settings().get("maintenance_mode") and user_id != 123456789: 
-        await update.message.reply_text(LANGUAGES.get("EN")["maintenance"])
+    # 2. Maintenance Check (Bypass for Admin)
+    if get_settings().get("maintenance_mode") and user_id != ADMIN_ID: 
+        txt = LANGUAGES.get("EN")["maintenance"]
+        if update.callback_query: await update.callback_query.edit_message_text(txt)
+        else: await update.message.reply_text(txt)
         return ConversationHandler.END
 
     # 3. Language Check
@@ -59,56 +62,84 @@ async def start_command(update: Update, context):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🇺🇸 English", callback_data="lang_EN"), InlineKeyboardButton("🇮🇳 Hindi", callback_data="lang_HI")]
         ])
-        if update.callback_query:
-            await update.callback_query.message.reply_text(LANGUAGES["EN"]["select_lang"], reply_markup=kb)
-        else:
-            await update.message.reply_text(LANGUAGES["EN"]["select_lang"], reply_markup=kb)
+        txt = LANGUAGES["EN"]["select_lang"]
+        if update.callback_query: await update.callback_query.edit_message_text(txt, reply_markup=kb)
+        else: await update.message.reply_text(txt, reply_markup=kb)
         return ConversationHandler.END
 
-    # Normal Start Flow
+    # --- MAIN DASHBOARD UI ---
     lang = user_data.get("language", "EN")
-    # Fallback to EN if key missing
     txt = LANGUAGES.get(lang, LANGUAGES["EN"])
     
-    msg = txt["welcome"].format(name=update.effective_user.first_name) + "\n\n🚀 **V5+ Engine Ready.**"
+    # Check Subscription Status for Badge
+    sub_status = "💎 VIP Active" if is_subscription_active(user_data) else "🆓 Free Plan"
     
-    buttons = [
-        [InlineKeyboardButton("🚀 START PREDICTION", callback_data="select_game_type")],
-        [InlineKeyboardButton("🛒 Shop", callback_data="shop_main"), InlineKeyboardButton("👤 Profile", callback_data="my_stats")]
-    ]
+    msg = (
+        f"🤖 **WINGO V5+ PRO**\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"👋 **Welcome, {update.effective_user.first_name}!**\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"🏷️ Status: **{sub_status}**\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"🔥 **Choose an Option:**"
+    )
+    
+    # NEW ATTRACTIVE LAYOUT
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Start Prediction", callback_data="select_game_type")],
+        [InlineKeyboardButton("🎯 Target Mode", callback_data="shop_target")], # Direct to Target Menu
+        [InlineKeyboardButton("🛒 VIP Shop", callback_data="shop_main"), InlineKeyboardButton("👤 My Profile", callback_data="my_stats")],
+        [InlineKeyboardButton("🎁 Redeem Code", callback_data="btn_redeem_hint"), InlineKeyboardButton("💬 Support", url="https://t.me/your_support_handle")]
+    ])
+    
     if update.callback_query:
-        await update.callback_query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+        # If triggered by "Back" button, we edit.
+        await update.callback_query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
     else:
-        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+        await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
+        
+    return ConversationHandler.END
+
+async def back_home_handler(update: Update, context):
+    """Universal Back Button Handler."""
+    await start_command(update, context, edit_mode=True)
+    return ConversationHandler.END
+
+async def redeem_hint(update: Update, context):
+    """Popup to tell user how to redeem."""
+    await update.callback_query.answer("💡 Type /redeem CODE to use a gift code!", show_alert=True)
 
 async def redeem_command(update: Update, context):
+    """The actual command: /redeem G-12345"""
+    user_id = update.effective_user.id
     try:
         code = context.args[0]
-        success, plan = redeem_gift_code(code, update.effective_user.id)
-        if success: await update.message.reply_text(f"✅ **Code Redeemed!**\nPlan: {plan}")
-        else: await update.message.reply_text("❌ Invalid Code.")
-    except: await update.message.reply_text("Usage: /redeem CODE")
+    except IndexError:
+        await update.message.reply_text("❌ **Usage:** `/redeem CODE`\nExample: `/redeem GIFT-12345`", parse_mode="Markdown")
+        return
+
+    success, plan_name = redeem_gift_code(code, user_id)
+    if success:
+        await update.message.reply_text(f"🎉 **SUCCESS!**\n\n💎 **Plan Activated:** {plan_name}\n🚀 You can now use the bot!", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ **Invalid or Expired Code.**")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Commands
+    # 1. SIMPLE COMMANDS
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(CommandHandler("admin", admin_command)) # Ensure ADMIN_ID in config.py is correct!
+    app.add_handler(CommandHandler("redeem", redeem_command))
     app.add_handler(CommandHandler("ban", ban_user_command))
     app.add_handler(CommandHandler("unban", unban_user_command))
-    app.add_handler(CommandHandler("redeem", redeem_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("packs", packs_command))
-    app.add_handler(CommandHandler("switch", switch_command))
-    app.add_handler(CommandHandler("reset", reset_command))
-    app.add_handler(CommandHandler("invite", invite_command))
-    app.add_handler(CommandHandler("refstats", admin_referral_stats_command))
     
-    # Lang
+    # 2. LANG & NAV
     app.add_handler(CallbackQueryHandler(set_language, pattern="^lang_"))
+    app.add_handler(CallbackQueryHandler(back_home_handler, pattern="^back_home$"))
+    app.add_handler(CallbackQueryHandler(redeem_hint, pattern="^btn_redeem_hint$"))
 
-    # Admin Conversation
+    # 3. ADMIN CONVERSATION
     admin_h = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_callback, pattern="^adm_")],
         states={
@@ -120,67 +151,52 @@ def main():
     )
     app.add_handler(admin_h)
 
-    # Game Conversation
+    # 4. GAME CONVERSATION (Prediction)
     pred_h = ConversationHandler(
         entry_points=[CallbackQueryHandler(select_game_type, pattern="^select_game_type$")],
         states={
             SELECTING_GAME_TYPE: [CallbackQueryHandler(start_game_flow, pattern="^game_")],
             WAITING_FOR_FEEDBACK: [CallbackQueryHandler(handle_feedback, pattern="^check_")]
         },
-        fallbacks=[CommandHandler("start", start_command)],
+        fallbacks=[CallbackQueryHandler(back_home_handler, pattern="^back_home$"), CommandHandler("start", start_command)],
         allow_reentry=True
     )
     app.add_handler(pred_h)
     
-    # Shop Conversation
+    # 5. SHOP CONVERSATION
     buy_h = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_buy, pattern="^start_prediction_flow$"), CallbackQueryHandler(start_buy, pattern="^buy_")],
+        entry_points=[
+            CallbackQueryHandler(shop_callback, pattern="^shop_"), # Main Shop Entry
+            CallbackQueryHandler(start_buy, pattern="^buy_")       # Direct Buy Trigger
+        ],
         states={
             SELECTING_PLAN: [CallbackQueryHandler(start_buy, pattern="^buy_")],
             WAITING_FOR_PAYMENT_PROOF: [CallbackQueryHandler(confirm_sent, pattern="^sent$")],
             WAITING_FOR_UTR: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_utr)]
         },
-        fallbacks=[CommandHandler("start", start_command)],
+        fallbacks=[CallbackQueryHandler(back_home_handler, pattern="^back_home$"), CommandHandler("start", start_command)],
         allow_reentry=True
     )
     app.add_handler(buy_h)
 
-    # Target Conversation
+    # 6. TARGET CONVERSATION
     target_h = ConversationHandler(
-        entry_points=[CommandHandler("target", target_command)],
+        entry_points=[CommandHandler("target", target_command), CallbackQueryHandler(target_command, pattern="^shop_target$")],
         states={
             TARGET_START_MENU: [CallbackQueryHandler(target_resume, pattern="^target_resume$")],
             TARGET_SELECT_GAME: [CallbackQueryHandler(start_target_game, pattern="^tgt_game_")],
             TARGET_GAME_LOOP: [CallbackQueryHandler(target_loop, pattern="^tgt_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start_command)],
+        fallbacks=[CallbackQueryHandler(back_home_handler, pattern="^back_home$"), CommandHandler("start", start_command)],
         allow_reentry=True
     )
     app.add_handler(target_h)
 
-    # SureShot Conversation
-    sureshot_h = ConversationHandler(
-        entry_points=[CommandHandler("sureshot", sureshot_command)],
-        states={
-            SURESHOT_MENU: [CallbackQueryHandler(sureshot_start, pattern="^ss_start")],
-            SURESHOT_LOOP: [
-                CallbackQueryHandler(sureshot_refresh, pattern="^ss_refresh"),
-                CallbackQueryHandler(sureshot_outcome, pattern="^ss_(win|loss)")
-            ]
-        },
-        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start_command)],
-        allow_reentry=True
-    )
-    app.add_handler(sureshot_h)
+    # 7. EXTRAS
+    app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) # Payment Approval
+    app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats")) # Profile
 
-    # Global Callbacks
-    app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_"))
-    app.add_handler(CallbackQueryHandler(shop_callback, pattern="^shop_"))
-    app.add_handler(CallbackQueryHandler(packs_command, pattern="^back_start"))
-    app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats"))
-    app.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_"))
-
-    print("🤖 Bot Online (V5+ Pro Update)")
+    print("🤖 Bot Online (Dashboard Fixed + Payment Fix + Admin Fix)")
     app.run_polling()
 
 if __name__ == "__main__":
