@@ -6,14 +6,14 @@ load_dotenv()
 # --- Configuration ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGO_URI_HERE")
-# REPLACE WITH YOUR REAL ADMIN ID
-ADMIN_ID = int(os.getenv("ADMIN_ID", "6239774927")) 
+ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
 
 # --- Constants ---
 REGISTER_LINK = "https://t.me/+pR0EE-BzatNjZjNl" 
-PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/980672312225460287/1433268868255580262/Screenshot_20251029-1135273.png?ex=695bbee7&is=695a6d67&hm=de9c75b5fca21700f383f81d1155e4f917694ce02cceb3d9ad555493137fbb5d&"
+PAYMENT_IMAGE_URL = "https://cdn.discordapp.com/attachments/888361275464220733/1451949298928455831/Screenshot_20251029-1135273.png"
+PREDICTION_PROMPT = "➡️ **Please wait for the next period...**"
 
-# --- Localization ---
+# --- Localization (FULL CONTENT RESTORED) ---
 LANGUAGES = {
     "EN": {
         "welcome": "👋 Hello, **{name}**!",
@@ -60,7 +60,11 @@ BETTING_SEQUENCE = [1, 2, 4, 8, 16, 32]
 MAX_LEVEL = len(BETTING_SEQUENCE)
 MAX_HISTORY_LENGTH = 12 
 PATTERN_LENGTH = 4
-V5_SALT = "gods_plan"
+PATTERN_PROBABILITY = 0.8
+
+# --- SALTS ---
+V5_SALT = "ar-lottery-v5-plus"
+TRUSTWIN_SALT = "gods_plan"
 
 ALL_PATTERNS = [
     (['Big', 'Big', 'Big', 'Big'], "BBBB"),
@@ -73,12 +77,9 @@ ALL_PATTERNS = [
     (['Big', 'Small', 'Small', 'Big'], "BSSB"),
 ]
 
-# --- SHARED STATES ---
+# --- SHARED STATES (Used across modules) ---
 (SELECTING_PLAN, WAITING_FOR_PAYMENT_PROOF, WAITING_FOR_UTR, 
  SELECTING_GAME_TYPE, WAITING_FOR_FEEDBACK, 
  TARGET_START_MENU, TARGET_SELECT_GAME, TARGET_GAME_LOOP,
  ADMIN_BROADCAST_MSG, SURESHOT_MENU, SURESHOT_LOOP,
- ADMIN_GIFT_WAIT) = range(12)
-
-
-
+ ADMIN_GIFT_WAIT, SELECTING_PLATFORM) = range(13)
