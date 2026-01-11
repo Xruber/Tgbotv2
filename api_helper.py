@@ -1,6 +1,7 @@
 import requests
 import time
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,8 @@ TRUSTWIN_URLS = {
     "current": "https://trustwin.vip/apifolder/api/webapi/GetGameIssue"
 }
 
-# Exact Payloads provided by user
+# NOTE: These payloads use STATIC timestamps/signatures provided by you.
+# If the server checks for expiration, these will eventually fail.
 TRUSTWIN_PAYLOADS = {
     "30s_history": {
         "pageSize": 10, "pageNo": 1, "typeId": 4, "language": 0,
@@ -50,40 +52,71 @@ TRUSTWIN_PAYLOADS = {
     }
 }
 
-def get_headers():
-    return {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-        "Referer": "https://www.92lottery.com/",
-        "Origin": "https://www.92lottery.com",
-        "Content-Type": "application/json;charset=UTF-8"
-    }
+def get_headers(platform="Tiranga"):
+    """
+    Returns headers specific to the platform.
+    TrustWin blocks requests if the Origin is wrong.
+    """
+    if platform == "TrustWin":
+        return {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Referer": "https://trustwin.vip/",
+            "Origin": "https://trustwin.vip",
+            "Content-Type": "application/json;charset=UTF-8"
+        }
+    else:
+        # Default for Tiranga/Raja
+        return {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Referer": "https://www.92lottery.com/",
+            "Origin": "https://www.92lottery.com",
+            "Content-Type": "application/json;charset=UTF-8"
+        }
 
 def get_game_data(game_type="30s", platform="Tiranga"):
-    """
-    Fetches Current Period and History.
-    Adapts based on Platform: TrustWin (POST) vs Others (GET).
-    """
     clean_history = []
     current_period = None
     
     try:
         if platform == "TrustWin":
             # --- TRUSTWIN (POST) ---
-            # 1. Current Period
+            headers = get_headers("TrustWin")
+            
+            # 1. Get Current Period
             c_key = "30s_current" if game_type == "30s" else "1m_current"
             try:
-                c_resp = requests.post(TRUSTWIN_URLS["current"], json=TRUSTWIN_PAYLOADS[c_key], headers=get_headers(), timeout=5)
+                c_resp = requests.post(
+                    TRUSTWIN_URLS["current"], 
+                    json=TRUSTWIN_PAYLOADS[c_key], 
+                    headers=headers, 
+                    timeout=5
+                )
                 c_data = c_resp.json()
-                if 'data' in c_data:
+                
+                # Debug Print to see what server says
+                if c_resp.status_code != 200:
+                    print(f"DEBUG TRUSTWIN CURRENT: {c_resp.status_code} - {c_resp.text}")
+
+                if 'data' in c_data and isinstance(c_data['data'], dict):
                     current_period = c_data['data'].get('issueNumber')
             except Exception as e:
                 logger.error(f"TrustWin Current Error: {e}")
 
-            # 2. History
+            # 2. Get History
             h_key = "30s_history" if game_type == "30s" else "1m_history"
             try:
-                h_resp = requests.post(TRUSTWIN_URLS["history"], json=TRUSTWIN_PAYLOADS[h_key], headers=get_headers(), timeout=5)
+                h_resp = requests.post(
+                    TRUSTWIN_URLS["history"], 
+                    json=TRUSTWIN_PAYLOADS[h_key], 
+                    headers=headers, 
+                    timeout=5
+                )
                 h_data = h_resp.json()
+                
+                # Debug Print
+                if h_resp.status_code != 200:
+                    print(f"DEBUG TRUSTWIN HISTORY: {h_resp.status_code} - {h_resp.text}")
+
                 raw_list = h_data.get('data', {}).get('list', [])
                 
                 for item in raw_list:
@@ -98,15 +131,15 @@ def get_game_data(game_type="30s", platform="Tiranga"):
 
         else:
             # --- TIRANGA / RAJAGAMES (GET) ---
+            headers = get_headers("Tiranga")
             type_key = "1m" if game_type == "1m" else "30s"
             urls = COMMON_URLS[type_key]
             timestamp = int(time.time() * 1000)
             
             # 1. Current
             try:
-                curr_resp = requests.get(f"{urls['current']}?ts={timestamp}", headers=get_headers(), timeout=5)
+                curr_resp = requests.get(f"{urls['current']}?ts={timestamp}", headers=headers, timeout=5)
                 curr_data = curr_resp.json()
-                # Try standard paths
                 if isinstance(curr_data, dict):
                     if 'data' in curr_data and isinstance(curr_data['data'], dict):
                         current_period = curr_data['data'].get('issueNumber')
@@ -115,7 +148,7 @@ def get_game_data(game_type="30s", platform="Tiranga"):
             except: pass
 
             # 2. History
-            hist_resp = requests.get(f"{urls['history']}?ts={timestamp}&page=1&size=10", headers=get_headers(), timeout=5)
+            hist_resp = requests.get(f"{urls['history']}?ts={timestamp}&page=1&size=10", headers=headers, timeout=5)
             hist_data = hist_resp.json()
             raw_list = hist_data.get('data', {}).get('list', [])
             
@@ -127,7 +160,7 @@ def get_game_data(game_type="30s", platform="Tiranga"):
             
             clean_history.reverse()
 
-        # --- FALLBACK ---
+        # --- FALLBACK CALCULATION ---
         if not current_period and clean_history:
             last_issue = int(clean_history[-1]['p'])
             current_period = str(last_issue + 1)
@@ -135,5 +168,5 @@ def get_game_data(game_type="30s", platform="Tiranga"):
         return str(current_period) if current_period else None, clean_history
 
     except Exception as e:
-        logger.error(f"API Fetch Error ({platform} {game_type}): {e}")
+        logger.error(f"API Error ({platform} {game_type}): {e}")
         return None, []
