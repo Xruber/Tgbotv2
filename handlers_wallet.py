@@ -1,5 +1,7 @@
+import matplotlib
+matplotlib.use('Agg') # Safe mode for servers
+import matplotlib.pyplot as plt
 import io
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import ContextTypes, ConversationHandler
 from database import (
@@ -11,27 +13,21 @@ from database import (
 )
 from config import ADMIN_ID, PAYMENT_IMAGE_URL
 
-# --- SAFE MATPLOTLIB IMPORT (Prevents Crash) ---
-try:
-    import matplotlib
-    matplotlib.use('Agg') 
-    import matplotlib.pyplot as plt
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
-    print("⚠️ Matplotlib not found. Charts disabled.")
-
 # --- CONVERSATION STATES ---
+# Deposit/Withdraw
 DEP_AMOUNT, DEP_METHOD, DEP_UTR = range(10, 13)
 WD_AMOUNT, WD_METHOD, WD_DETAILS = range(20, 23)
+# Trading (New)
+TRADE_AMOUNT = 30
 
 # --- CHART GENERATOR ---
 def generate_chart_image(symbol, history):
     """Generates a price chart image buffer."""
-    if not HAS_MATPLOTLIB: return None
     try:
         fig, ax = plt.subplots(figsize=(6, 3), dpi=100)
+        # Color: Green if up, Red if down
         color = '#00ff00' if len(history) > 1 and history[-1] >= history[0] else '#ff0000'
+        
         ax.plot(history, marker='o', linestyle='-', color=color, linewidth=2, markersize=4)
         ax.set_title(f"{symbol} Price History")
         ax.set_ylabel("Price (INR)")
@@ -40,7 +36,7 @@ def generate_chart_image(symbol, history):
         buf = io.BytesIO()
         fig.savefig(buf, format='png', bbox_inches='tight')
         buf.seek(0)
-        plt.close(fig)
+        plt.close(fig) 
         return buf
     except Exception as e:
         print(f"Chart Error: {e}")
@@ -67,6 +63,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             assets_val += val
             holdings_txt += f"🔹 **{t['name']}:** {qty} (≈₹{int(val)})\n"
 
+    # Pending Transactions
     txs = get_user_transactions(uid, limit=3)
     pending_txt = ""
     for tx in txs:
@@ -88,12 +85,11 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     kb = [
         [InlineKeyboardButton("➕ Deposit", callback_data="start_deposit"), InlineKeyboardButton("➖ Withdraw", callback_data="start_withdraw")],
-        [InlineKeyboardButton("📈 Invest", callback_data="wallet_tokens"), InlineKeyboardButton("📉 Sell", callback_data="wallet_sell")],
+        [InlineKeyboardButton("📈 Invest / Trade", callback_data="wallet_tokens")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ]
     
     if update.callback_query:
-        # Check if we need to delete a photo (chart) before sending text
         if update.callback_query.message.photo:
             await update.callback_query.message.delete()
             await context.bot.send_message(uid, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -108,6 +104,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    await q.answer()
     tokens = get_all_tokens()
     
     msg = "📈 **TOKEN MARKET**\nSelect a token to view Chart & Buy:\n━━━━━━━━━━━━━━\n"
@@ -118,17 +115,17 @@ async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     kb.append([InlineKeyboardButton("🔙 Back", callback_data="wallet_main")])
     
-    # Handle transition from Chart (Photo) to Menu (Text)
     if q.message.photo:
         await q.message.delete()
         await context.bot.send_message(q.from_user.id, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
     else:
         await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    return ConversationHandler.END
 
 async def view_token_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the chart and purchase options."""
     q = update.callback_query
-    await q.answer("Loading...")
+    await q.answer("Loading Chart...")
     
     sym = q.data.split("_")[2]
     token = get_token_details(sym)
@@ -137,6 +134,7 @@ async def view_token_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text("❌ Token not found.")
         return
 
+    # Generate Chart
     history = token.get("history", [token['price']])
     if len(history) < 2: history = [token['price']] * 5 
     
@@ -145,76 +143,113 @@ async def view_token_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = (
         f"📊 **{token['name']} ({sym})**\n"
         f"━━━━━━━━━━━━━━\n"
-        f"💰 **Price:** ₹{token['price']}\n"
-        f"📉 **Low:** ₹{min(history)}\n"
-        f"📈 **High:** ₹{max(history)}\n"
+        f"💰 **Current Price:** ₹{token['price']}\n"
+        f"📉 **Low (24h):** ₹{min(history)}\n"
+        f"📈 **High (24h):** ₹{max(history)}\n"
     )
     
+    # NEW TRADING BUTTONS (Start Conversation)
     kb = [
-        [InlineKeyboardButton("✅ Buy 1 Unit", callback_data=f"trade_buy_{sym}")],
-        [InlineKeyboardButton("🔙 Back", callback_data="wallet_tokens")]
+        [InlineKeyboardButton("🟢 BUY", callback_data=f"ask_buy_{sym}"), InlineKeyboardButton("🔴 SELL", callback_data=f"ask_sell_{sym}")],
+        [InlineKeyboardButton("🔙 Back to Market", callback_data="wallet_tokens")]
     ]
     
+    # Cleanup previous message to prevent flickers/errors
     await q.message.delete()
     
     if chart_buf:
         await context.bot.send_photo(q.from_user.id, photo=chart_buf, caption=caption, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
     else:
-        # Fallback if matplotlib is missing
-        await context.bot.send_message(q.from_user.id, caption + "\n\n(Chart not available)", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        await context.bot.send_message(q.from_user.id, caption + "\n(Chart unavailable)", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    return ConversationHandler.END
 
-async def buy_token_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ==========================================
+# 3. FLEXIBLE BUYING / SELLING LOGIC
+# ==========================================
+
+async def ask_trade_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks user for quantity to buy/sell."""
     q = update.callback_query
-    sym = q.data.split("_")[2]
-    uid = q.from_user.id
+    await q.answer()
+    
+    data = q.data.split("_")
+    action = data[1] # "buy" or "sell"
+    sym = data[2]
+    
+    context.user_data['trade_action'] = action
+    context.user_data['trade_symbol'] = sym
     
     token = get_token_details(sym)
-    if not token: 
-        await q.answer("Token error", show_alert=True)
-        return
-    
-    w = get_user_wallet(uid)
-    if w['balance'] >= token['price']:
-        trade_token(uid, sym, 1, token['price'], is_buy=True)
-        await q.answer(f"✅ Success! Bought 1 {sym}", show_alert=True)
-        await view_token_chart(update, context) # Refresh
-    else:
-        await q.answer("❌ Insufficient Funds", show_alert=True)
-
-# ==========================================
-# 3. SELL & DEPOSIT/WITHDRAW
-# ==========================================
-
-async def sell_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
+    price = token['price']
     uid = q.from_user.id
-    w = get_user_wallet(uid)
-    kb = []
-    tokens = get_all_tokens()
+    wallet = get_user_wallet(uid)
     
-    for sym, qty in w.get('holdings', {}).items():
-        if qty > 0:
-            t = next((x for x in tokens if x['symbol'] == sym), None)
-            if t: kb.append([InlineKeyboardButton(f"Sell 1 {sym} (+₹{t['price']})", callback_data=f"trade_sell_{sym}")])
-            
-    kb.append([InlineKeyboardButton("🔙 Back", callback_data="wallet_main")])
-    
+    if action == "buy":
+        bal = wallet['balance']
+        max_can_buy = int(bal // price)
+        msg = (
+            f"🟢 **BUY {sym}**\n"
+            f"💰 Price: ₹{price}\n"
+            f"💵 Balance: ₹{bal:.2f}\n"
+            f"🛒 Max you can buy: **{max_can_buy}**\n\n"
+            f"🔢 **Type the amount to BUY:**"
+        )
+    else: # Sell
+        holdings = wallet.get('holdings', {}).get(sym, 0)
+        msg = (
+            f"🔴 **SELL {sym}**\n"
+            f"💰 Price: ₹{price}\n"
+            f"🎒 You own: **{holdings}**\n\n"
+            f"🔢 **Type the amount to SELL:**"
+        )
+
+    # Use edit_message_caption if coming from photo, else edit text
     if q.message.photo:
         await q.message.delete()
-        await context.bot.send_message(uid, "📉 **SELL TOKENS**", reply_markup=InlineKeyboardMarkup(kb))
+        await context.bot.send_message(uid, msg, parse_mode="Markdown")
     else:
-        await q.edit_message_text("📉 **SELL TOKENS**", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(msg, parse_mode="Markdown")
+        
+    return TRADE_AMOUNT
 
-async def sell_token_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    sym = q.data.split("_")[2]
-    uid = q.from_user.id
-    token = get_token_details(sym)
+async def execute_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processes the text input for amount."""
+    text = update.message.text
+    uid = update.effective_user.id
     
-    if token:
-        trade_token(uid, sym, 1, token['price'], is_buy=False)
-        await q.answer(f"✅ Sold 1 {sym}", show_alert=True)
-        await sell_menu(update, context)
+    try:
+        qty = int(text)
+        if qty <= 0: raise ValueError
+    except:
+        await update.message.reply_text("❌ Invalid number. Please type a valid quantity (e.g., 5).")
+        return TRADE_AMOUNT # Ask again
+
+    action = context.user_data.get('trade_action')
+    sym = context.user_data.get('trade_symbol')
+    token = get_token_details(sym)
+    price = token['price']
+    wallet = get_user_wallet(uid)
+    
+    if action == "buy":
+        cost = qty * price
+        if wallet['balance'] >= cost:
+            trade_token(uid, sym, qty, price, is_buy=True)
+            await update.message.reply_text(f"✅ **BOUGHT!**\n\n➕ {qty} {sym}\n➖ ₹{cost:.2f}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📉 View Chart", callback_data=f"view_chart_{sym}")]]))
+        else:
+            await update.message.reply_text(f"❌ **Insufficient Funds.**\nCost: ₹{cost}\nBalance: ₹{wallet['balance']}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"view_chart_{sym}")]]))
+            return ConversationHandler.END
+
+    elif action == "sell":
+        owned = wallet.get('holdings', {}).get(sym, 0)
+        if owned >= qty:
+            earnings = qty * price
+            trade_token(uid, sym, qty, price, is_buy=False)
+            await update.message.reply_text(f"✅ **SOLD!**\n\n➖ {qty} {sym}\n➕ ₹{earnings:.2f}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📉 View Chart", callback_data=f"view_chart_{sym}")]]))
+        else:
+            await update.message.reply_text(f"❌ **Insufficient Tokens.**\nYou have: {owned}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"view_chart_{sym}")]]))
+            return ConversationHandler.END
+
+    return ConversationHandler.END
 
 # --- DEPOSIT FLOW ---
 async def start_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -274,22 +309,20 @@ async def show_qr_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     except:
-        # Fallback to Text if image fails
         await context.bot.send_message(q.from_user.id, f"⚠️ **QR Error**\n\n{caption}", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         
     return DEP_UTR
 
 async def ask_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    CRASH FIX: Checks if message is text or photo before editing.
-    """
     q = update.callback_query
     await q.answer()
     
     msg = "🔢 **ENTER UTR NUMBER:**\n\nPlease type and send the 12-digit UTR number now."
     
+    # Safe edit check
     if q.message.photo:
-        await q.edit_message_caption(msg, parse_mode="Markdown")
+        await q.message.delete()
+        await context.bot.send_message(q.from_user.id, msg, parse_mode="Markdown")
     else:
         await q.edit_message_text(msg, parse_mode="Markdown")
         
@@ -410,7 +443,7 @@ async def process_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 # ==========================================
-# 👮 ADMIN HANDLER
+# 👮 ADMIN PAYMENT HANDLER
 # ==========================================
 
 async def admin_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
