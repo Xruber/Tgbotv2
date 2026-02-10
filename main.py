@@ -158,8 +158,8 @@ def main():
     app.add_handler(CommandHandler("invest", tokens_command))
     
     # Admin Token Commands
-    app.add_handler(CommandHandler("token-rig", token_rig_command))
-    app.add_handler(CommandHandler("token-roi-list", token_roi_list_command))
+    app.add_handler(CommandHandler("token_rig", token_rig_command))
+    app.add_handler(CommandHandler("token_roi_list", token_roi_list_command))
     
     # 2. GLOBAL HANDLERS
     app.add_handler(CallbackQueryHandler(set_language, pattern="^lang_"))
