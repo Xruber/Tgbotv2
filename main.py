@@ -18,7 +18,7 @@ from database import (
 # Import Handlers
 from handlers_users import (
     stats_command, switch_command, set_mode, reset_command, 
-    invite_command, cancel, cc_command
+    invite_command, cancel
 )
 from handlers_game import (
     select_platform, select_game_type, start_game_flow, handle_feedback
