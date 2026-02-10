@@ -151,7 +151,6 @@ def main():
     app.add_handler(CommandHandler("invite", invite_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("sureshot", sureshot_command))
-    app.add_handler(CommandHandler("cc", cc_command)) # Customer Care
     
     # Wallet Commands
     app.add_handler(CommandHandler("wallet", wallet_command))
