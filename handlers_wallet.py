@@ -1,7 +1,5 @@
-import matplotlib
-matplotlib.use('Agg') # Safe mode for servers
-import matplotlib.pyplot as plt
 import io
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import ContextTypes, ConversationHandler
 from database import (
@@ -13,20 +11,27 @@ from database import (
 )
 from config import ADMIN_ID, PAYMENT_IMAGE_URL
 
+# --- SAFE MATPLOTLIB IMPORT (Prevents Crash) ---
+try:
+    import matplotlib
+    matplotlib.use('Agg') 
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+    print("⚠️ Matplotlib not found. Charts disabled.")
+
 # --- CONVERSATION STATES ---
 DEP_AMOUNT, DEP_METHOD, DEP_UTR = range(10, 13)
 WD_AMOUNT, WD_METHOD, WD_DETAILS = range(20, 23)
 
-# --- CHART GENERATOR (Memory Safe) ---
+# --- CHART GENERATOR ---
 def generate_chart_image(symbol, history):
     """Generates a price chart image buffer."""
+    if not HAS_MATPLOTLIB: return None
     try:
-        # Use OO interface to avoid memory leaks
         fig, ax = plt.subplots(figsize=(6, 3), dpi=100)
-        
-        # Determine color: Green if up, Red if down
         color = '#00ff00' if len(history) > 1 and history[-1] >= history[0] else '#ff0000'
-        
         ax.plot(history, marker='o', linestyle='-', color=color, linewidth=2, markersize=4)
         ax.set_title(f"{symbol} Price History")
         ax.set_ylabel("Price (INR)")
@@ -35,7 +40,7 @@ def generate_chart_image(symbol, history):
         buf = io.BytesIO()
         fig.savefig(buf, format='png', bbox_inches='tight')
         buf.seek(0)
-        plt.close(fig) # Explicitly close the figure
+        plt.close(fig)
         return buf
     except Exception as e:
         print(f"Chart Error: {e}")
@@ -49,7 +54,6 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     wallet = get_user_wallet(uid)
     bal = wallet['balance']
     
-    # Calculate Assets
     tokens = get_all_tokens()
     assets_val = 0
     holdings = wallet.get('holdings', {})
@@ -63,7 +67,6 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             assets_val += val
             holdings_txt += f"🔹 **{t['name']}:** {qty} (≈₹{int(val)})\n"
 
-    # Pending Transactions
     txs = get_user_transactions(uid, limit=3)
     pending_txt = ""
     for tx in txs:
@@ -83,7 +86,6 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"**📂 PORTFOLIO:**\n{holdings_txt if holdings_txt else 'No tokens owned.'}"
     )
     
-    # RENAMED CALLBACKS to fix "Item Not Found" bug
     kb = [
         [InlineKeyboardButton("➕ Deposit", callback_data="start_deposit"), InlineKeyboardButton("➖ Withdraw", callback_data="start_withdraw")],
         [InlineKeyboardButton("📈 Invest", callback_data="wallet_tokens"), InlineKeyboardButton("📉 Sell", callback_data="wallet_sell")],
@@ -91,6 +93,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     if update.callback_query:
+        # Check if we need to delete a photo (chart) before sending text
         if update.callback_query.message.photo:
             await update.callback_query.message.delete()
             await context.bot.send_message(uid, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -115,6 +118,7 @@ async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     kb.append([InlineKeyboardButton("🔙 Back", callback_data="wallet_main")])
     
+    # Handle transition from Chart (Photo) to Menu (Text)
     if q.message.photo:
         await q.message.delete()
         await context.bot.send_message(q.from_user.id, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -124,7 +128,7 @@ async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def view_token_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the chart and purchase options."""
     q = update.callback_query
-    await q.answer("Generating Chart...")
+    await q.answer("Loading...")
     
     sym = q.data.split("_")[2]
     token = get_token_details(sym)
@@ -133,7 +137,6 @@ async def view_token_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text("❌ Token not found.")
         return
 
-    # Generate Chart
     history = token.get("history", [token['price']])
     if len(history) < 2: history = [token['price']] * 5 
     
@@ -142,24 +145,25 @@ async def view_token_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = (
         f"📊 **{token['name']} ({sym})**\n"
         f"━━━━━━━━━━━━━━\n"
-        f"💰 **Current Price:** ₹{token['price']}\n"
-        f"📉 **Low (24h):** ₹{min(history)}\n"
-        f"📈 **High (24h):** ₹{max(history)}\n"
+        f"💰 **Price:** ₹{token['price']}\n"
+        f"📉 **Low:** ₹{min(history)}\n"
+        f"📈 **High:** ₹{max(history)}\n"
     )
     
     kb = [
         [InlineKeyboardButton("✅ Buy 1 Unit", callback_data=f"trade_buy_{sym}")],
-        [InlineKeyboardButton("🔙 Back to Market", callback_data="wallet_tokens")]
+        [InlineKeyboardButton("🔙 Back", callback_data="wallet_tokens")]
     ]
     
     await q.message.delete()
+    
     if chart_buf:
         await context.bot.send_photo(q.from_user.id, photo=chart_buf, caption=caption, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
     else:
-        await context.bot.send_message(q.from_user.id, caption + "\n(Chart unavailable)", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        # Fallback if matplotlib is missing
+        await context.bot.send_message(q.from_user.id, caption + "\n\n(Chart not available)", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
 async def buy_token_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the actual purchase."""
     q = update.callback_query
     sym = q.data.split("_")[2]
     uid = q.from_user.id
@@ -173,9 +177,9 @@ async def buy_token_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if w['balance'] >= token['price']:
         trade_token(uid, sym, 1, token['price'], is_buy=True)
         await q.answer(f"✅ Success! Bought 1 {sym}", show_alert=True)
-        await view_token_chart(update, context) # Refresh chart
+        await view_token_chart(update, context) # Refresh
     else:
-        await q.answer("❌ Insufficient Funds. Please Deposit.", show_alert=True)
+        await q.answer("❌ Insufficient Funds", show_alert=True)
 
 # ==========================================
 # 3. SELL & DEPOSIT/WITHDRAW
@@ -270,14 +274,25 @@ async def show_qr_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     except:
-        await context.bot.send_message(q.from_user.id, "⚠️ **Error loading QR.**\nPay to Admin UPI and enter UTR.", reply_markup=InlineKeyboardMarkup(kb))
+        # Fallback to Text if image fails
+        await context.bot.send_message(q.from_user.id, f"⚠️ **QR Error**\n\n{caption}", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         
     return DEP_UTR
 
 async def ask_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    CRASH FIX: Checks if message is text or photo before editing.
+    """
     q = update.callback_query
     await q.answer()
-    await q.edit_message_caption("🔢 **ENTER UTR NUMBER:**\n\nPlease type and send the 12-digit UTR number now.")
+    
+    msg = "🔢 **ENTER UTR NUMBER:**\n\nPlease type and send the 12-digit UTR number now."
+    
+    if q.message.photo:
+        await q.edit_message_caption(msg, parse_mode="Markdown")
+    else:
+        await q.edit_message_text(msg, parse_mode="Markdown")
+        
     return DEP_UTR
 
 async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -287,7 +302,6 @@ async def receive_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     tx_id = create_transaction(uid, "deposit", amt, "UPI", utr)
     
-    # Notify Admin
     kb_admin = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Accept", callback_data=f"adm_dep_ok_{tx_id}"), 
          InlineKeyboardButton("❌ Reject", callback_data=f"adm_dep_no_{tx_id}")]
@@ -361,12 +375,7 @@ async def ask_withdraw_details(update: Update, context: ContextTypes.DEFAULT_TYP
     method = q.data.split("_")[2]
     context.user_data['wd_method'] = method
     
-    prompt = ""
-    if method == "UPI": prompt = "Enter your **UPI ID** (e.g., name@okaxis):"
-    elif method == "BANK": prompt = "Enter **Account No & IFSC**:"
-    elif method == "USDT": prompt = "Enter **TRC20 Wallet Address**:"
-    
-    await q.edit_message_text(f"📝 **Selected: {method}**\n\n{prompt}")
+    await q.edit_message_text(f"📝 **Selected: {method}**\n\nEnter Payment Details now:")
     return WD_DETAILS
 
 async def process_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -401,7 +410,7 @@ async def process_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 # ==========================================
-# 👮 ADMIN PAYMENT HANDLER
+# 👮 ADMIN HANDLER
 # ==========================================
 
 async def admin_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -419,7 +428,7 @@ async def admin_payment_handler(update: Update, context: ContextTypes.DEFAULT_TY
     uid = tx['user_id']
     amt = tx['amount']
     
-    if action == "dep": # DEPOSIT
+    if action == "dep": 
         if decision == "ok":
             update_wallet_balance(uid, amt)
             update_transaction_status(tx_id, "completed")
@@ -430,7 +439,7 @@ async def admin_payment_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(uid, f"❌ **Deposit Rejected.**\nAmount: ₹{amt}")
             await q.edit_message_text(f"❌ Rejected Deposit for {uid}")
             
-    elif action == "wd": # WITHDRAW
+    elif action == "wd":
         if decision == "ok":
             update_transaction_status(tx_id, "completed")
             await context.bot.send_message(uid, f"✅ **Withdrawal Sent!**\nAmount: ₹{amt}")
@@ -469,7 +478,6 @@ async def token_roi_list_command(update: Update, context: ContextTypes.DEFAULT_T
         wallet = u.get('wallet', {})
         holdings = wallet.get('holdings', {})
         invested = wallet.get('invested_amt', {})
-        
         total_current_val = 0
         total_invested_val = 0
         
@@ -481,17 +489,11 @@ async def token_roi_list_command(update: Update, context: ContextTypes.DEFAULT_T
                 
         if total_invested_val > 0:
             roi_pct = ((total_current_val - total_invested_val) / total_invested_val) * 100
-            roi_data.append({
-                "uid": u['user_id'],
-                "roi": roi_pct,
-                "profit": total_current_val - total_invested_val
-            })
+            roi_data.append({"uid": u['user_id'], "roi": roi_pct})
             
     roi_data.sort(key=lambda x: x['roi'], reverse=True)
-    
     msg = "🏆 **TOKEN ROI LEADERBOARD**\n━━━━━━━━━━━━━━\n"
     for i, d in enumerate(roi_data[:10]):
-        msg += f"{i+1}. User `{d['uid']}`: **{d['roi']:.1f}%** (Profit: ₹{int(d['profit'])})\n"
+        msg += f"{i+1}. User `{d['uid']}`: **{d['roi']:.1f}%**\n"
         
-    if not roi_data: msg += "No investments found."
     await update.message.reply_text(msg, parse_mode="Markdown")
