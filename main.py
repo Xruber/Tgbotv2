@@ -26,13 +26,14 @@ from handlers_admin import (
     ban_user_command, unban_user_command, gift_generation
 )
 
-# NEW WALLET HANDLERS (renamed to avoid collision with Shop)
+# NEW WALLET HANDLERS
+# CHANGE 1: Added imports for ask_trade_amount, execute_trade, TRADE_AMOUNT
 from handlers_wallet import (
-    wallet_command, tokens_command, buy_token_confirm, view_token_chart,
-    sell_menu, sell_token_confirm, admin_payment_handler,
+    wallet_command, tokens_command, view_token_chart, ask_trade_amount, execute_trade,
+    admin_payment_handler,
     start_deposit, select_deposit_amount, show_qr_code, ask_utr, receive_utr as receive_dep_utr,
     start_withdraw, select_withdraw_method, ask_withdraw_details, process_withdrawal,
-    DEP_AMOUNT, DEP_METHOD, DEP_UTR, WD_AMOUNT, WD_METHOD, WD_DETAILS,
+    DEP_AMOUNT, DEP_METHOD, DEP_UTR, WD_AMOUNT, WD_METHOD, WD_DETAILS, TRADE_AMOUNT,
     token_rig_command, token_roi_list_command
 )
 
@@ -51,17 +52,14 @@ async def start_command(update: Update, context, edit_mode=False):
     uid = update.effective_user.id
     ud = get_user_data(uid)
     
-    # 1. Ban Check
     if ud.get("is_banned"):
         await update.message.reply_text("🚫 **Access Denied.**\nYou are banned.")
         return ConversationHandler.END
 
-    # 2. Maintenance Check
     if get_settings().get("maintenance_mode") and uid != ADMIN_ID: 
         await update.message.reply_text("🛠 **Maintenance Mode**\nBot is currently under update.")
         return ConversationHandler.END
 
-    # 3. Language Check
     if not ud.get("language"):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🇺🇸 English", callback_data="lang_EN"), InlineKeyboardButton("🇮🇳 Hindi", callback_data="lang_HI")]
@@ -69,7 +67,6 @@ async def start_command(update: Update, context, edit_mode=False):
         await update.message.reply_text("🌐 **Select Language:**", reply_markup=kb)
         return ConversationHandler.END
 
-    # --- DASHBOARD ---
     sub_status = "💎 VIP Active" if is_subscription_active(ud) else "🆓 Free Plan"
     
     msg = (
@@ -82,7 +79,7 @@ async def start_command(update: Update, context, edit_mode=False):
         f"🔥 **Main Menu:**"
     )
     
-    # Updated Wallet Callback to 'wallet_main'
+    # CHANGE 2: Updated callback to 'wallet_main' to match handlers_wallet.py
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Start Prediction", callback_data="select_platform")],
         [InlineKeyboardButton("💰 Wallet", callback_data="wallet_main"), InlineKeyboardButton("🛒 Shop", callback_data="shop_main")],
@@ -111,7 +108,6 @@ async def redeem_command(update: Update, context):
         else: await update.message.reply_text("❌ Invalid Code")
     except: await update.message.reply_text("Usage: /redeem CODE")
 
-# --- CUSTOMER CARE STUB ---
 async def cc_command(update: Update, context):
     await update.message.reply_text(f"💬 **Support:**\nContact @{ADMIN_ID} (Admin)")
 
@@ -129,9 +125,8 @@ def main():
     app.add_handler(CommandHandler("invite", invite_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("sureshot", sureshot_command))
-    app.add_handler(CommandHandler("cc", cc_command))
     
-    # Wallet Commands (FIXED UNDERSCORES)
+    # Wallet Commands
     app.add_handler(CommandHandler("wallet", wallet_command))
     app.add_handler(CommandHandler("token_rig", token_rig_command))
     app.add_handler(CommandHandler("token_roi_list", token_roi_list_command))
@@ -141,61 +136,28 @@ def main():
     app.add_handler(CallbackQueryHandler(back_home_handler, pattern="^back_home$"))
     app.add_handler(CallbackQueryHandler(redeem_hint, pattern="^btn_redeem_hint$"))
     
-    # Admin Callbacks (Shop & Wallet)
+    # Admin Callbacks
     app.add_handler(CallbackQueryHandler(admin_action, pattern="^adm_(ok|no)_")) 
     app.add_handler(CallbackQueryHandler(admin_payment_handler, pattern="^adm_(dep|wd)_"))
 
+    common_fallbacks = [CallbackQueryHandler(back_home_handler, pattern="^back_home$")]
+
     # 3. CONVERSATION HANDLERS
-    
-    common_fallbacks = [
-        CallbackQueryHandler(back_home_handler, pattern="^back_home$"),
-        CommandHandler("start", start_command),
-        CommandHandler("admin", admin_command),
-        CommandHandler("cancel", cancel)
-    ]
 
-    # A. ADMIN DASHBOARD
-    admin_h = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_callback, pattern="^adm_")],
-        states={
-            ADMIN_BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_broadcast)],
-            ADMIN_GIFT_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gift_generation)]
-        },
-        fallbacks=common_fallbacks,
-        per_user=True
-    )
-    app.add_handler(admin_h)
-
-    # B. PREDICTION (Platform -> Game -> Feedback)
-    pred_h = ConversationHandler(
-        entry_points=[CallbackQueryHandler(select_platform, pattern="^select_platform$")],
-        states={
-            SELECTING_PLATFORM: [CallbackQueryHandler(select_game_type, pattern="^plat_")],
-            SELECTING_GAME_TYPE: [CallbackQueryHandler(start_game_flow, pattern="^game_")],
-            WAITING_FOR_FEEDBACK: [CallbackQueryHandler(handle_feedback, pattern="^check_")]
-        },
-        fallbacks=common_fallbacks,
-        allow_reentry=True
-    )
-    app.add_handler(pred_h)
-    
-    # C. SHOP (Buying Plans)
-    buy_h = ConversationHandler(
+    # CHANGE 3: Added NEW Trading Conversation Handler
+    trade_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(shop_callback, pattern="^shop_"),
-            CallbackQueryHandler(start_buy, pattern="^buy_") 
+            CallbackQueryHandler(ask_trade_amount, pattern="^ask_(buy|sell)_")
         ],
         states={
-            SELECTING_PLAN: [CallbackQueryHandler(start_buy, pattern="^buy_")],
-            WAITING_FOR_PAYMENT_PROOF: [CallbackQueryHandler(confirm_sent, pattern="^sent$")],
-            WAITING_FOR_UTR: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_utr)]
+            TRADE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, execute_trade)]
         },
-        fallbacks=common_fallbacks,
-        allow_reentry=True
+        fallbacks=[CallbackQueryHandler(view_token_chart, pattern="^view_chart_"), CallbackQueryHandler(wallet_command, pattern="^wallet_main$")],
+        per_user=True
     )
-    app.add_handler(buy_h)
+    app.add_handler(trade_conv)
 
-    # D. WALLET DEPOSIT (Amount -> Method -> UTR)
+    # Deposit Conversation
     dep_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_deposit, pattern="^start_deposit$")],
         states={
@@ -211,7 +173,7 @@ def main():
     )
     app.add_handler(dep_conv)
 
-    # E. WALLET WITHDRAW (Pct -> Method -> Details)
+    # Withdraw Conversation
     wd_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_withdraw, pattern="^start_withdraw$")],
         states={
@@ -224,7 +186,48 @@ def main():
     )
     app.add_handler(wd_conv)
 
-    # F. TARGET MODE
+    # Shop Conversation
+    buy_h = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(shop_callback, pattern="^shop_"),
+            CallbackQueryHandler(start_buy, pattern="^buy_")
+        ],
+        states={
+            SELECTING_PLAN: [CallbackQueryHandler(start_buy, pattern="^buy_")],
+            WAITING_FOR_PAYMENT_PROOF: [CallbackQueryHandler(confirm_sent, pattern="^sent$")],
+            WAITING_FOR_UTR: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_utr)]
+        },
+        fallbacks=common_fallbacks,
+        allow_reentry=True
+    )
+    app.add_handler(buy_h)
+
+    # Admin Conversation
+    admin_h = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_callback, pattern="^adm_")],
+        states={
+            ADMIN_BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_broadcast)],
+            ADMIN_GIFT_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gift_generation)]
+        },
+        fallbacks=common_fallbacks,
+        per_user=True
+    )
+    app.add_handler(admin_h)
+
+    # Prediction Conversation
+    pred_h = ConversationHandler(
+        entry_points=[CallbackQueryHandler(select_platform, pattern="^select_platform$")],
+        states={
+            SELECTING_PLATFORM: [CallbackQueryHandler(select_game_type, pattern="^plat_")],
+            SELECTING_GAME_TYPE: [CallbackQueryHandler(start_game_flow, pattern="^game_")],
+            WAITING_FOR_FEEDBACK: [CallbackQueryHandler(handle_feedback, pattern="^check_")]
+        },
+        fallbacks=common_fallbacks,
+        allow_reentry=True
+    )
+    app.add_handler(pred_h)
+    
+    # Target Conversation
     target_h = ConversationHandler(
         entry_points=[CommandHandler("target", target_command), CallbackQueryHandler(target_command, pattern="^shop_target$")],
         states={
@@ -237,7 +240,7 @@ def main():
     )
     app.add_handler(target_h)
 
-    # G. SURESHOT MODE
+    # Sureshot Conversation
     sureshot_h = ConversationHandler(
         entry_points=[CommandHandler("sureshot", sureshot_command)],
         states={
@@ -252,20 +255,18 @@ def main():
     )
     app.add_handler(sureshot_h)
 
-    # 4. OTHER CALLBACKS
+    # 4. OTHER CALLBACKS (Must be last)
     app.add_handler(CallbackQueryHandler(stats_command, pattern="^my_stats")) 
     app.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_"))
     
-    # Wallet Standalone Callbacks (Registered with NEW patterns)
+    # Wallet Standalone Callbacks
+    # CHANGE 4: Updated these regex patterns to match the new names in handlers_wallet.py
     app.add_handler(CallbackQueryHandler(wallet_command, pattern="^wallet_main$"))
     app.add_handler(CallbackQueryHandler(tokens_command, pattern="^wallet_tokens$"))
     app.add_handler(CallbackQueryHandler(view_token_chart, pattern="^view_chart_"))
-    app.add_handler(CallbackQueryHandler(buy_token_confirm, pattern="^trade_buy_"))
-    app.add_handler(CallbackQueryHandler(sell_menu, pattern="^wallet_sell$"))
-    app.add_handler(CallbackQueryHandler(sell_token_confirm, pattern="^trade_sell_"))
-
+    
     print("--------------------------------------------------")
-    print(f"✅ Bot Online (Wallet Fixed + Charts Active)")
+    print(f"✅ Bot Online (Flexible Buy + Fixes)")
     print(f"🔑 ADMIN_ID loaded as: {ADMIN_ID}")
     print("--------------------------------------------------")
     
